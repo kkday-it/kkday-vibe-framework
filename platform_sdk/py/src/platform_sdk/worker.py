@@ -5,7 +5,7 @@
   1. 讀該專案 pending 表,row lock 撿 `ready` 的 run
   2. 對每個 run 呼叫 platform_sdk.run_workflow (或拋出新的 K8s Job)
   3. 在途 run 數控制在 manifest max_parallel(預設 3)內
-  4. 從 DB 全量重建 vibefile index 頁
+  4. 從 DB 全量重建狀態頁 index(cloud-ready 落點為 S3 / status endpoint)
 
 MVP:佔位 — 印出職責並立即退出(符合「秒退」形狀,不做常駐迴圈)。
 """

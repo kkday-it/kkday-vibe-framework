@@ -2,7 +2,7 @@
 
 - render_run(run_id):單一 run 的狀態頁(<run_id>.html)— 步驟時間軸+log 明細
 - render_index():專案 index.html — 從 runs/ 全量重建(DB 就緒後改讀 DB)
-執行中的 run 頁帶 <meta refresh>,配合 vibefile 同名覆蓋 = 輪詢式準實時。
+執行中的 run 頁帶 <meta refresh>,配合狀態頁同名覆蓋(cloud-ready 落點為 S3 / status endpoint)= 輪詢式準實時。
 PII 紅線:遮罩交給呼叫端 log 時不寫明細;本 renderer 不外掛資料。
 用法:python -m platform_sdk.render_status [--run-id r-x] [--runs-dir runs]
 """

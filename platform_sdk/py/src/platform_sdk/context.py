@@ -13,6 +13,7 @@ import warnings
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 from dotenv import load_dotenv
 
@@ -123,19 +124,65 @@ class NotificationManager:
 
 
 class StorageManager:
-    """ctx.storage — 儲存輸出檔案(本地寫 /tmp，未來支援 S3)。"""
+    """ctx.storage — 產出檔案儲存 adapter(Spec §2.4 / §2.8),用 env 切換實作。
+
+    STORAGE_PROVIDER=local(預設,開發用)| s3(雲上)。
+    - local:寫 /tmp(暫存;重啟即失、多 pod 不共享)—— **僅供本機開發,不可當持久儲存**。
+    - s3:走 AWS SDK 預設憑證鏈(pod 綁 IAM role),程式內零 key;只需 S3_BUCKET(+ 選用 AWS_REGION / S3_PREFIX)。
+    """
+
     def __init__(self, log: LogManager):
         self._log = log
-        import os
-        from pathlib import Path
-        self.base_path = Path(os.environ.get("VIBE_STORAGE_PATH", "/tmp/vibe_storage"))
-        self.base_path.mkdir(parents=True, exist_ok=True)
-        
-    def write_text(self, filename: str, content: str):
+        self.provider = os.environ.get("STORAGE_PROVIDER", "local").lower()
+        if self.provider == "s3":
+            self.bucket = os.environ.get("S3_BUCKET")
+            if not self.bucket:
+                raise ValueError("[storage] STORAGE_PROVIDER=s3 需要 S3_BUCKET env(fail fast,Spec §2.2)")
+            self.region = os.environ.get("AWS_REGION")
+            self.prefix = os.environ.get("S3_PREFIX", "").strip("/")
+        else:
+            self.base_path = Path(os.environ.get("VIBE_STORAGE_PATH", "/tmp/vibe_storage"))
+            self.base_path.mkdir(parents=True, exist_ok=True)
+
+    def _s3(self):
+        # 預設憑證鏈(Spec §2.4);不讀 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+        import boto3
+        return boto3.client("s3", region_name=self.region) if self.region else boto3.client("s3")
+
+    def _key(self, filename: str) -> str:
+        return f"{self.prefix}/{filename}" if self.prefix else filename
+
+    def put(self, filename: str, content, content_type: Optional[str] = None) -> str:
+        """上傳產出並回傳可存取位置(s3://... 或本機路徑)。content 可為 str 或 bytes。"""
+        data = content.encode("utf-8") if isinstance(content, str) else content
+        if self.provider == "s3":
+            key = self._key(filename)
+            kwargs = {"Bucket": self.bucket, "Key": key, "Body": data}
+            if content_type:
+                kwargs["ContentType"] = content_type
+            self._s3().put_object(**kwargs)
+            uri = f"s3://{self.bucket}/{key}"
+            self._log.info(f"📝 [STORAGE:s3] 已上傳: {uri}")
+            return uri
         path = self.base_path / filename
-        path.write_text(content, encoding="utf-8")
-        self._log.info(f"📝 [STORAGE] 檔案已寫入: {path}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        self._log.info(f"📝 [STORAGE:local] 寫入 {path}(暫存,勿當持久儲存;雲上請設 STORAGE_PROVIDER=s3)")
         return str(path)
+
+    def presigned_url(self, filename: str, expires_in: int = 3600) -> str:
+        """給瀏覽器直接下載的 presigned URL(僅 s3,Spec §2.4)。"""
+        if self.provider != "s3":
+            raise NotYetImplemented("presigned_url() 僅在 STORAGE_PROVIDER=s3 可用")
+        return self._s3().generate_presigned_url(
+            "get_object",
+            Params={"Bucket": self.bucket, "Key": self._key(filename)},
+            ExpiresIn=expires_in,
+        )
+
+    def write_text(self, filename: str, content: str) -> str:
+        """相容舊介面 → 等同 put(text)。"""
+        return self.put(filename, content, content_type="text/plain; charset=utf-8")
 
 
 class BrowserManager:

@@ -91,21 +91,74 @@ class Notify {
     }
 }
 exports.Notify = Notify;
+/**
+ * ctx.storage — 產出檔案儲存 adapter(Spec §2.4 / §2.8),用 env 切換實作。
+ *
+ * STORAGE_PROVIDER=local(預設,開發用)| s3(雲上)。
+ * - local:寫 /tmp(暫存;重啟即失、多 pod 不共享)—— 僅供本機開發,不可當持久儲存。
+ * - s3:走 AWS SDK 預設憑證鏈(pod 綁 IAM role),程式內零 key;只需 S3_BUCKET(+ 選用 AWS_REGION / S3_PREFIX)。
+ *   需安裝選用相依 @aws-sdk/client-s3。
+ */
 class StorageManager {
     logger;
-    basePath;
+    provider;
+    basePath = '';
+    bucket = '';
+    region;
+    prefix = '';
     constructor(logger) {
         this.logger = logger;
-        this.basePath = process.env.VIBE_STORAGE_PATH || '/tmp/vibe_storage';
-        if (!fs.existsSync(this.basePath)) {
-            fs.mkdirSync(this.basePath, { recursive: true });
+        this.provider = (process.env.STORAGE_PROVIDER || 'local').toLowerCase();
+        if (this.provider === 's3') {
+            if (!process.env.S3_BUCKET) {
+                throw new Error('[storage] STORAGE_PROVIDER=s3 需要 S3_BUCKET env(fail fast, Spec §2.2)');
+            }
+            this.bucket = process.env.S3_BUCKET;
+            this.region = process.env.AWS_REGION;
+            this.prefix = (process.env.S3_PREFIX || '').replace(/^\/+|\/+$/g, '');
+        }
+        else {
+            this.basePath = process.env.VIBE_STORAGE_PATH || '/tmp/vibe_storage';
+            if (!fs.existsSync(this.basePath)) {
+                fs.mkdirSync(this.basePath, { recursive: true });
+            }
         }
     }
-    writeText(filename, content) {
+    key(filename) {
+        return this.prefix ? `${this.prefix}/${filename}` : filename;
+    }
+    async s3Client() {
+        // 預設憑證鏈(Spec §2.4);不讀 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+        // 用變數 specifier 讓 tsc 不做靜態解析(選用相依,未安裝時才在 runtime 報錯)
+        const spec = '@aws-sdk/client-s3';
+        const mod = await Promise.resolve(`${spec}`).then(s => __importStar(require(s))).catch(() => {
+            throw new Error('[storage] 需要選用相依 @aws-sdk/client-s3(npm i @aws-sdk/client-s3)');
+        });
+        return { mod, client: new mod.S3Client(this.region ? { region: this.region } : {}) };
+    }
+    /** 上傳產出並回傳可存取位置(s3://... 或本機路徑)。 */
+    async put(filename, content, contentType) {
+        const body = typeof content === 'string' ? Buffer.from(content, 'utf-8') : content;
+        if (this.provider === 's3') {
+            const key = this.key(filename);
+            const { mod, client } = await this.s3Client();
+            await client.send(new mod.PutObjectCommand({
+                Bucket: this.bucket, Key: key, Body: body,
+                ...(contentType ? { ContentType: contentType } : {}),
+            }));
+            const uri = `s3://${this.bucket}/${key}`;
+            this.logger.info(`📝 [STORAGE:s3] 已上傳: ${uri}`);
+            return uri;
+        }
         const filePath = path.join(this.basePath, filename);
-        fs.writeFileSync(filePath, content, 'utf-8');
-        this.logger.info(`📝 [STORAGE] 檔案已寫入: ${filePath}`);
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        fs.writeFileSync(filePath, body);
+        this.logger.info(`📝 [STORAGE:local] 寫入 ${filePath}(暫存,勿當持久儲存;雲上請設 STORAGE_PROVIDER=s3)`);
         return filePath;
+    }
+    /** 相容舊介面 → 等同 put(text)。 */
+    async writeText(filename, content) {
+        return this.put(filename, content, 'text/plain; charset=utf-8');
     }
 }
 exports.StorageManager = StorageManager;

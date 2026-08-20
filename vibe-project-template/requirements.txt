@@ -1,7 +1,12 @@
-# kkday-connectors: 公司共用 connector 套件(send_slack/send_mail/publish_vibefile + platform_sdk shim/worker/runner)
-# 尚未發佈;發佈前請安裝 platform_sdk 原始碼版本:
-git+https://github.com/kkday-it/kkday-vibe-framework.git#subdirectory=platform_sdk/py
+# kkday-connectors: 公司共用 connector 套件(send_slack/send_mail + platform_sdk shim/worker/runner)
+# 尚未發佈;發佈前安裝 platform_sdk 原始碼版本。
+# 釘死 git tag 以確保 docker build 可重現(Spec §2.1);tag 名穩定、不隨 commit amend 變動。
+# 對應含 storage adapter 的 SDK 版本;發新版時建立新 tag 並更新此處。
+# 注意:安裝前需先 push 此 tag 到 origin,否則 fresh clone 解析不到。
+git+https://github.com/kkday-it/kkday-vibe-framework.git@sdk-v0.2.0#subdirectory=platform_sdk/py
 
 pyyaml==6.0.1
 flask==3.0.0
 gunicorn==21.2.0
+# migrate.py 需要;Spec §5 自我檢查要求空 DB 能跑 migrate
+psycopg2-binary==2.9.9

@@ -12,7 +12,7 @@ touches:
   internal_apis: []             # 例:[product-service, order-service]
   external_sites: []            # 例:[thsr.com.tw]
   integrations: []              # 例:[slack, gmail]  # 一律經 kkday-connectors,禁自申 token
-  databases: []                 # 例:[vibe-db/team-project, replica/order-db:ro]
+  databases: []                 # 例:[rds/team-project, replica/order-db:ro]
   pii: false                    # 有碰客人個資 → 強制 yellow 以上
 
 initiators: []                  # 誰能觸發/重跑(角色名單,如 [op-team, cs-team]);空 = 只有 owner 的 team
