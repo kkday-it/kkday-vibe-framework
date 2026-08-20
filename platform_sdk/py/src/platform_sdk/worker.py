@@ -21,8 +21,8 @@ def main():
     args = parser.parse_args()
 
     logging.info(f"worker 啟動(專案配置: {args.project_yaml})")
-    logging.info("MVP 佔位:vibe DB pending 表與 ingest 尚未就緒,無件可派,立即退出(秒退形狀)")
-    # TODO(vibe DB 就緒): 撿 ready → Dkron API 開一次性 run job → 重建 index → 回收完成 job
+    logging.info("MVP 佔位:目前已改為 K8s CronJob 直接呼叫 api.py，無待辦任務，立即退出。")
+    # TODO: 未來若有自建 Database Queue 需求，在此實作撿件與派發 K8s Job。
 
 
 if __name__ == "__main__":
