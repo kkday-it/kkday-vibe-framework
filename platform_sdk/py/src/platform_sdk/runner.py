@@ -1,7 +1,6 @@
 """執行單一 workflow run:載 flow → 注入 ctx → 執行 → 失敗三件套(§12-3)。
 
-run wrapper 職責(§6.3):開跑寫 run 記錄、結束更新狀態(MVP 記在 JSONL/摘要檔;
-vibe DB 就緒後改寫 DB)、之後由框架重建狀態頁 index。
+run wrapper 職責(§6.3):開跑寫 run 記錄、結束更新狀態(MVP 記在 JSONL/摘要檔)、之後由框架重建狀態頁 index。
 """
 import importlib.util
 import json
@@ -53,7 +52,7 @@ def _finish(ctx, t0, result):
     result.setdefault("status", "unknown")
     summary = {"run_id": ctx.run_id, "workflow": ctx.workflow_id, "status": result["status"],
                "duration_s": duration, "log": str(ctx.log.path)}
-    # run 摘要(vibe DB 就緒前先落地本機,供狀態頁 index 重建)
+    # run 摘要(供狀態頁 index 重建)
     log_dir = Path(os.environ.get("VIBE_LOG_PATH", "/tmp/vibe_logs"))
     log_dir.mkdir(parents=True, exist_ok=True)
     (log_dir / f"{ctx.run_id}.summary.json").write_text(

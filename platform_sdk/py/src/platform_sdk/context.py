@@ -48,7 +48,7 @@ class LogManager:
     """結構化 JSONL log(§12-2):每行 ts/run_id/workflow/step/level/msg/data。
 
     執行中寫本機 runs/<run_id>.jsonl(結束由框架上傳 S3 — MVP 先留本機);
-    同時鏡射到 stdout 供 Dkron 執行紀錄。
+    同時鏡射到 stdout 供 K8s 執行紀錄。
     """
 
     def __init__(self, workflow_id, run_id, log_dir="/tmp/vibe_logs"):
@@ -232,7 +232,7 @@ class _NotYet:
 class Context:
     """注入給所有 workflow flow 的 Context — 與外界互動的唯一合法管道。
 
-    模式(VIBE_RUN_MODE):interactive(預設,本機) | worker(無人在場,Dkron 派工)。
+    模式(VIBE_RUN_MODE):interactive(預設,本機) | worker(無人在場,排程派工)。
     """
 
     def __init__(self, workflow_id, run_id=None, mode=None):
@@ -247,7 +247,7 @@ class Context:
         self.browser = BrowserManager(self.log)
 
         # 介面凍結、實作隨 kkday-connectors 補齊(§12)
-        self.db = _NotYet("db", "vibe DB(專案 schema)")
+        self.db = _NotYet("db", "Database(專案 schema)")
         self.storage = StorageManager(self.log)
         self.sheet = _NotYet("sheet", "Google Sheet 匯出視圖(SA+Shared Drive)")
         self.mail = _NotYet("mail", "發信(SA+白名單寄件人)")
