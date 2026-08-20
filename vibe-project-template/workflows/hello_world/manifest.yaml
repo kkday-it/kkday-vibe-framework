@@ -1,0 +1,13 @@
+version: "1.0"
+workflow:
+  id: "sample.hello.world"
+  name: "Hello World Report"
+  description: "A sample cloud-ready workflow that fetches some data and writes a report to storage, then notifies Slack."
+  risk_tier: "green"
+permissions:
+  credentials:
+    - "secret://hello_world_api_key"
+  network:
+    allow_hosts:
+      - "api.github.com"
+  needs_browser: false

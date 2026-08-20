@@ -98,17 +98,42 @@ class LogManager:
 
 
 class NotificationManager:
-    """ctx.notify(msg) — Slack 通知(team channel)。MVP 印 log,介面即最終形。"""
+    """ctx.notify(msg) — Slack 通知(team channel)。如果環境變數有 SLACK_WEBHOOK_URL 則發送。"""
 
     def __init__(self, log: LogManager):
         self._log = log
 
     def __call__(self, message):
-        # MVP:印出;kkday-connectors 就緒後改打統一 bot
-        self._log.info(f"🔔 [SLACK NOTIFY] {message}")
+        import os
+        webhook_url = os.environ.get("SLACK_WEBHOOK_URL")
+        if webhook_url:
+            import requests
+            try:
+                requests.post(webhook_url, json={"text": message}, timeout=5)
+                self._log.info(f"🔔 [SLACK NOTIFY SENT] {message}")
+            except Exception as e:
+                self._log.error(f"❌ [SLACK NOTIFY FAILED] {e}")
+        else:
+            self._log.info(f"🔔 [SLACK NOTIFY MOCKED] {message}")
 
     def slack(self, message):  # 舊介面相容
         self(message)
+
+
+class StorageManager:
+    """ctx.storage — 儲存輸出檔案(本地寫 /tmp，未來支援 S3)。"""
+    def __init__(self, log: LogManager):
+        self._log = log
+        import os
+        from pathlib import Path
+        self.base_path = Path(os.environ.get("VIBE_STORAGE_PATH", "/tmp/vibe_storage"))
+        self.base_path.mkdir(parents=True, exist_ok=True)
+        
+    def write_text(self, filename: str, content: str):
+        path = self.base_path / filename
+        path.write_text(content, encoding="utf-8")
+        self._log.info(f"📝 [STORAGE] 檔案已寫入: {path}")
+        return str(path)
 
 
 class BrowserManager:
@@ -221,7 +246,7 @@ class Context:
 
         # 介面凍結、實作隨 kkday-connectors 補齊(§12)
         self.db = _NotYet("db", "vibe DB(專案 schema)")
-        self.storage = _NotYet("storage", "S3 檔案產出")
+        self.storage = StorageManager(self.log)
         self.sheet = _NotYet("sheet", "Google Sheet 匯出視圖(SA+Shared Drive)")
         self.mail = _NotYet("mail", "發信(SA+白名單寄件人)")
 

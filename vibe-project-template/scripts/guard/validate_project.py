@@ -50,13 +50,22 @@ def check_workflows():
             continue
         try:
             data = yaml.safe_load(manifest.read_text()) or {}
-            for field in ["id", "owner", "type", "intent", "risk_tier", "inputs", "outputs", "credentials"]:
-                if field not in data:
-                    errors.append(f"workflows/{workflow.name}: manifest 缺欄位 {field}")
-            creds = data.get("credentials", [])
+            
+            # Schema Validation (Basic)
+            if data.get("version") != "1.0":
+                errors.append(f"workflows/{workflow.name}: 必須有 version: '1.0'")
+                
+            wf_data = data.get("workflow", {})
+            for field in ["id", "description", "risk_tier"]:
+                if field not in wf_data:
+                    errors.append(f"workflows/{workflow.name}: workflow 區塊缺欄位 {field}")
+                    
+            permissions = data.get("permissions", {})
+            creds = permissions.get("credentials", [])
             for ref in creds:
-                if not ref.startswith("vault://"):
-                    errors.append(f"workflows/{workflow.name}: credentials 只准 vault:// 引用,不准出現值({ref[:20]}…)")
+                if not ref.startswith("vault://") and not ref.startswith("secret://"):
+                    errors.append(f"workflows/{workflow.name}: credentials 只准 vault:// 或 secret:// 引用,不准出現值({ref[:20]}…)")
+                    
         except Exception as e:
             errors.append(f"workflows/{workflow.name}: manifest 解析失敗 ({e})")
         if not (workflow / "tests").is_dir():
@@ -88,10 +97,65 @@ def check_forbidden_deps(risk_tier: str):
             warnings.append(msg)
 
 
+def check_cloud_ready_spec(data: dict):
+    # 1. 必備檔案缺失
+    if not (ROOT / "Dockerfile").exists():
+        errors.append("Cloud-Ready: 根目錄缺少 Dockerfile")
+    if not (ROOT / ".dockerignore").exists():
+        errors.append("Cloud-Ready: 根目錄缺少 .dockerignore")
+        
+    # 2. 環境變數分類
+    env_example = ROOT / ".env.example"
+    if env_example.exists():
+        content = env_example.read_text()
+        if "[Runtime Secret]" not in content or "[Runtime Plain]" not in content:
+            warnings.append("Cloud-Ready: .env.example 未包含 [Runtime Secret] 與 [Runtime Plain] 的分類標籤")
+            
+    # 3. 排程 API 檢查
+    schedules = data.get("schedules")
+    if schedules:
+        api_py = ROOT / "src" / "api.py"
+        if api_py.exists():
+            api_content = api_py.read_text()
+            if "/api/jobs/" not in api_content and "cron" not in api_content:
+                errors.append("Cloud-Ready: 宣告了 schedule，但 src/api.py 中沒有 /api/jobs/ 相關的 Endpoint 實作")
+        else:
+            errors.append("Cloud-Ready: 宣告了 schedule，但找不到 src/api.py 或對應的 Cron Endpoint")
+
+    # 4. 反模式掃描
+    anti_patterns = {
+        "localhost": "禁用 localhost，應走內部 DNS 或跨容器服務名",
+        "127.0.0.1": "禁用 127.0.0.1，應走內部 DNS",
+        "sqlite": "禁用 SQLite，Cloud-Ready 請走 PostgreSQL",
+        "./uploads": "禁用本地寫入 ./uploads，請使用 ctx.storage / S3",
+        "CREATE TABLE": "禁止 runtime DDL，請走 db/migrations"
+    }
+    for file_path in ROOT.rglob("*.py"):
+        if "venv" in str(file_path) or ".venv" in str(file_path) or "scripts/guard" in str(file_path):
+            continue
+        try:
+            content = file_path.read_text().lower()
+            for pattern, msg in anti_patterns.items():
+                if pattern in content:
+                    errors.append(f"Cloud-Ready 反模式 ({file_path.name}): {msg}")
+        except Exception:
+            pass
+            
+    # 5. Dockerfile 安全規範
+    dockerfile = ROOT / "Dockerfile"
+    if dockerfile.exists():
+        df_content = dockerfile.read_text()
+        if "USER root" in df_content or re.search(r'^USER\s+0', df_content, re.M):
+            errors.append("Cloud-Ready Dockerfile: 禁止使用 root 權限 (USER root)")
+        if "COPY .env " in df_content or "COPY .env.production" in df_content:
+            errors.append("Cloud-Ready Dockerfile: 禁止複製 .env 進入 image，secret 必須由 runtime 注入")
+
+
 def main() -> int:
     data = check_project_yaml()
     check_workflows()
     check_forbidden_deps(str(data.get("risk_tier", "green")))
+    check_cloud_ready_spec(data)
 
     for w in warnings:
         print(f"::warning::{w}")

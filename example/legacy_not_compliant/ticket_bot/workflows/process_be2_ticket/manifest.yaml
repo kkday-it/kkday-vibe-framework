@@ -1,0 +1,28 @@
+id: process_be2_ticket
+owner: your.name
+type: automation
+intent: "處理單一客服工單 (額滿/未成團)，包含登入 be2、搜尋訂單、建立工單、後拋並發送語系通知"
+risk_tier: red
+
+inputs:
+  order_id:
+    type: string
+    description: "KKday 訂單編號或供應商訂單編號"
+  wantan_type:
+    type: string
+    description: "挽單類型 ('mituan' = 未成團, 'mansatisfied' = 額滿)"
+  follow_type:
+    type: string
+    description: "後續處理類型"
+
+outputs:
+  ticket_id:
+    type: string
+    description: "建立成功的 be2 工單 ID"
+  status:
+    type: string
+    description: "success or error"
+
+credentials:
+  - vault://ticket_bot/BE2_USERNAME
+  - vault://ticket_bot/BE2_PASSWORD

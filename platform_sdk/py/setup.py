@@ -8,6 +8,7 @@ setup(
         "python-dotenv",
         "playwright",   # 主引擎(§12-6);首次使用需 playwright install chromium
         "pyyaml",
+        "requests",
     ],
     extras_require={
         # Selenium 降級相容(get_driver 已標 Deprecation;example 改寫完移除)

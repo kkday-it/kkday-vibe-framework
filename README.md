@@ -1,75 +1,80 @@
-# Vibe Framework ☁️
+# Vibe Framework
 
-Vibe Framework 是一個為企業級自動化量身打造的開發與佈署框架。
+Vibe Framework 是一套讓企業員工與 AI coding agent 產出 **cloud-ready enterprise workflow** 的 repo template、SDK shim 與治理規約。
 
-它的核心精神是 **"Vibe Coding"**：讓非工程背景的營運團隊、PM 或是 AI Assistant (例如 Cursor, Windsurf) 能夠專注於撰寫「商業邏輯腳本」，而將所有關於權限管控、憑證管理、排程、與雲端原生 (Cloud-Native) 基礎設施的複雜性，全部交由底層的 **`platform_sdk`** 與 DevOps 團隊來接管。
+本 repo 的最高指導原則是 [vibe-cloud-ready-spec.md](vibe-cloud-ready-spec.md)：目標環境是公司內部 AWS EKS、RDS PostgreSQL、S3、Kubernetes CronJob、stdout/stderr logging，以及由平台 config-manager 注入的 runtime env/secrets。任何提案、template 或 SDK 行為若與這份 DevOps spec 衝突，以 DevOps spec 為準。
 
-## 📖 給 AI 助手 (For AI Agents) 的核心指引
+## 核心目標
 
-如果你是一個 AI Agent，請在撰寫或修改任何程式碼之前，**務必詳細閱讀**以下兩份核心文件：
+- 讓非工程背景同仁或 AI assistant 可以寫商業 workflow，但不用自行決定憑證、排程、儲存、部署與雲端約束。
+- 讓每個專案從第一天就符合 EKS 上雲條件：stateless、runtime env、PostgreSQL、S3、HTTP job endpoint、health endpoint。
+- 讓治理資訊機器可讀：`PROJECT.yaml` 宣告 owner、risk tier、touches、PII、排程與外部連線。
+- 讓 workflow 只透過 `ctx.*` adapter 碰外界，日後底層從 local shim 換成正式平台時，業務程式不用重寫。
 
-1. **架構與風格指南**: [vibe-project-template/CLAUDE.md](vibe-project-template/CLAUDE.md)
-   - 定義了什麼是 `Workflow`、為什麼不能在原始碼中留下憑證、以及如何正確地操作資料庫。
-2. **上雲硬性約束 (Cloud-Ready Spec)**: [vibe-cloud-ready-spec.md](vibe-cloud-ready-spec.md)
-   - 定義了專案必須打包成 Docker 容器放入 Kubernetes (EKS) 的 12 條鐵則（例如：必須無狀態、禁止寫入本機硬碟、正確的 Port 綁定等）。
+## Repo 內容
 
-## 🏗️ 框架核心概念
-
-### 1. Platform SDK (`platform_sdk/`)
-這是整個框架的「護城河 (Adapter)」。它攔截了所有可能造成副作用的操作。
-- 所有的外部連線、憑證取得、Log 輸出、Slack 通知，都**必須**透過它注入的 `Context` 物件來執行。
-- 在本機端，它可以讀取 `.env`；在雲端環境，它可以無縫切換為讀取 AWS Vault 或 K8s Secrets，而上層應用程式完全不需改寫。
-
-### 2. Workflows (`workflows/`)
-這是原子化的自動化單位 (Atomic Unit of Work)。
-- 每一個流程 (如：自動登入 Odoo 填表、去後台抓取訂單) 都被獨立封裝在 `workflows/<workflow_name>/` 下。
-- 每個 Workflow 都必須擁有 `manifest.yaml` 來嚴格宣告它會觸碰到的外部系統，以利資安治理。
-- 外部的 API Server 或 Web UI，僅能透過 `run_workflow("workflow_id", inputs={...})` 來呼叫它們。
-
----
-
-## 📂 專案結構
-
-```
+```text
 .
-├── platform_sdk/               # 核心 Adapter 層，支援多語言
-│   ├── py/                     # Python 版本的 SDK 與執行器
-│   └── ts/                     # Node.js/TypeScript 版本的 SDK
-├── vibe-project-template/      # 專案建立範本與檢查腳本 (Guard)
-│   ├── CLAUDE.md               # AI 開發指南
-│   ├── workflows/              # Workflow 範本
-│   └── scripts/guard/          # CI/CD 檢查腳本
-├── example/                    # 實際導入框架的範例專案
-│   ├── insurance_app/          # 範例：旅行保險自動投保 (Streamlit UI + Playwright)
-│   ├── bpm_app/                # 範例：Odoo 匯退單自動送審 (Streamlit UI + Playwright)
-│   └── ticket_bot/             # 範例：客服工單處理 (Flask API)
-└── vibe-cloud-ready-spec.md    # EKS 上雲 12 條硬性約束
+├── vibe-cloud-ready-spec.md       # DevOps 上雲硬約束，最高優先級
+├── project-template-v0.md         # Enterprise Workflows repo 層提案
+├── platform_sdk/
+│   ├── py/                        # Python ctx.* local shim
+│   └── ts/                        # TypeScript ctx.* local shim
+├── vibe-project-template/         # 新專案模板
+│   ├── CLAUDE.md                  # AI coding rules
+│   ├── docs/cloud-ready-spec.md   # template 內附的 DevOps spec copy
+│   ├── PROJECT.yaml               # 專案身分證範本
+│   └── scripts/guard/             # repo guard checks
+├── registry/                      # PROJECT.yaml 登錄冊 MVP
+└── docs/roadmap.md                # 重要但尚未實作的能力
 ```
 
-## 🚀 快速開始 (For Users / DevOps)
+內部案例、PDF、私人討論素材不隨此 repo 發布；它們可以作為遷移參考，但不是 framework 的公開驗收依據。
 
-這裡的每個範例專案 (`example/`) 都已經是 100% Cloud-Native 的微服務。你可以進入任何一個範例中啟動它。
+## 目前成熟度
 
-以 `bpm_app` 為例：
+這個 repo 目前是 **M1 template + SDK shim**，不是完整 runtime 平台。
 
-### 本機開發測試
-```bash
-cd example/bpm_app
-# 啟動 Streamlit 介面
-./run.sh web 
-```
+已可用：
 
-### 容器化打包與上雲
-我們已經為每個專案準備好了 `Dockerfile`，並內建了非 root 使用者與正確的 0.0.0.0 綁定。
-```bash
-cd example/bpm_app
-# 建立 Image
-docker build -t vibe-bpm-app .
+- `PROJECT.yaml` 與 workflow manifest 的基本治理形狀。
+- `CLAUDE.md` 讓 AI agent 在產出程式前讀 cloud-ready spec。
+- Python/TypeScript `ctx.*` local shim 的基本形狀。
+- guard CI 的基本 schema/secret/dependency 檢查。
+- registry script 的主動登錄 MVP。
 
-# 運行容器 (由於完全無狀態，你可以隨意重啟或開多個 Replica)
-docker run -p 8501:8501 --env-file .env vibe-bpm-app
-```
+仍在 roadmap：
 
----
+- scaffold 指令。
+- Kubernetes CronJob/GitOps 自動同步。
+- `ctx.storage`、`ctx.db`、`ctx.sheet`、`ctx.mail` 的正式 connector 實作。
+- CODEOWNERS/curator review 自動化。
+- 進階狀態機、magic link、重跑與 kill switch。
 
-> *"Build for the Cloud, Code for the Vibe."* 
+完整清單見 [docs/roadmap.md](docs/roadmap.md)。
+
+## 新專案原則
+
+從 `vibe-project-template/` 開新專案時，請把 [vibe-cloud-ready-spec.md](vibe-cloud-ready-spec.md) 視為驗收清單，而不是建議：
+
+- container 監聽 `$PORT` 並綁 `0.0.0.0`
+- 設定與 secret 只從 runtime env 來
+- 檔案產出進 S3，暫存只用 `/tmp`
+- DB 使用外部 PostgreSQL，schema 變更走 forward-only migration
+- 排程由 Kubernetes CronJob 呼叫 HTTP endpoint，例如 `POST /api/jobs/<name>`
+- health endpoint 不依賴 DB 或外部服務
+- audit log / status / notification 不可含 secret 或未遮罩 PII
+
+## 給 AI Assistant 的指引
+
+修改任何 template、SDK 或 workflow 規約前，先讀：
+
+1. [vibe-cloud-ready-spec.md](vibe-cloud-ready-spec.md)
+2. [project-template-v0.md](project-template-v0.md)
+3. [vibe-project-template/CLAUDE.md](vibe-project-template/CLAUDE.md)
+
+如果文件之間出現衝突，依序採用：
+
+1. DevOps cloud-ready spec
+2. template/guard 中已實作的機器規則
+3. roadmap 中的未來設計

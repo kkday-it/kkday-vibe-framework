@@ -1,70 +1,99 @@
 # AI 開發規則
 
+這是一個 `vibe-project-template` 專案。你在修改或建立任何檔案之前，**必須**先閱讀 `docs/cloud-ready-spec.md`。這份 DevOps 上雲標準是所有架構決策的依歸。
+
 <!-- ============================================================
      公司共用段(scaffold 生成,勿改。修訂走 vibe-project-template repo)
      ============================================================ -->
 
-## 資料夾規約(三條,其他自由)
+## 最高原則
 
-1. **src/ 與 workflows/ 分離**:src/ 放專案內部邏輯;「有副作用、要被治理」的動作單元(打內部 API、操作外部網站、發訊息)一律寫成 workflows/ 下的 workflow 包(照 workflow-contract-v0:manifest.yaml + flow + README + tests/)。判斷法:這段程式碼掛掉或亂跑會不會影響別人/別的系統?會 → workflows/。
-2. **integrations/ 不寫業務邏輯**:只放連線設定與 connector 引用。
-3. **assets/ 與 docs/ 不進 src/**:AI 生成的圖、報告、截圖一律 assets/。
+- 本專案最終部署在公司內部 EKS。開發任何功能前，先讀 `docs/cloud-ready-spec.md`。
+- 若本檔與 `docs/cloud-ready-spec.md` 衝突，以 `docs/cloud-ready-spec.md` 為準。
+- 預設目標是 Docker + EKS + RDS PostgreSQL + S3 + Kubernetes CronJob + runtime env/secrets。
+
+## Cloud-Ready 鐵則
+
+- HTTP service 必須讀 `$PORT` 並綁 `0.0.0.0`。
+- 必須提供無外部依賴的 `/health` 或 `/api/health`，不可查 DB、不可登入、不可打外部服務。
+- 所有設定與 secret 只從 runtime env 來；新增 env 時同步更新 `.env.example`，並標註分類、用途、必填與否。
+- 容器內不寫專案目錄；暫存只寫 `/tmp`，檔案產出走 `ctx.storage` / S3。
+- DB 一律 PostgreSQL；SQLite / JSON file DB / file queue 只可用於 local prototype，不可進 cloud-ready path。
+- schema 變更走 `db/migrations/NNNN_description.sql`；runtime 不做 DDL。
+- log 寫 stdout/stderr；audit log、status page、notification 不能含 secret 或未遮罩 PII。
+
+## 資料夾規約
+
+1. **src/ 與 workflows/ 分離**：`src/` 放服務與專案內部邏輯；「有副作用、要被治理」的動作單元一律寫成 `workflows/` 下的 workflow 包。
+2. **adapters/integrations 不寫業務邏輯**：只封裝平台差異與 vendor SDK。
+3. **assets/ 與 docs/ 不進 src/**：AI 生成的圖、報告、截圖一律放 `assets/` 或 S3，不要散在 repo 根目錄。
 
 ## 憑證鐵則
 
-- 程式碼與設定檔**永遠只出現 `vault://` 引用或 env 變數名**,絕不出現帳密/token/key 的值。
-- `.env` 只存在本機,永不 commit(.gitignore 已擋)。新增變數時同步更新 `.env.example`(只放 key 名與說明)。
+- 程式碼與設定檔永遠只出現 `vault://` 引用或 env 變數名，絕不出現帳密/token/key 的值。
+- `.env` 只存在本機，永不 commit。
+- 不要在 Docker build 階段使用 secret；secret 只在 runtime 注入。
 
 ## 串接鐵則
 
-- Slack/Gmail 等外部服務**只准經 `kkday-connectors`**(src/ 內直接呼叫);禁止自申 bot/token、禁止直接使用 slack_sdk、google-api-python-client 等 SDK 拿 token。
-- **workflows/ 內連 connectors 也不准直用**:workflow 只認 `ctx.*`(ctx.secrets / ctx.browser / ctx.notify / ctx.checkpoint),由 platform_sdk shim 在底下實作。
+- Slack/Gmail/Google/AWS 等外部服務經公司 connector 或 `ctx.*` adapter。
+- workflow 內只認 `ctx.*`：`ctx.secrets`、`ctx.browser`、`ctx.notify`、`ctx.db`、`ctx.storage`、`ctx.sheet`、`ctx.mail`、`ctx.log`、`ctx.checkpoint`。
+- 黃/紅區 workflow 禁止直接 import vendor SDK；vendor SDK 只能出現在 adapter。
 
 ## DB 鐵則
 
-- 公司生產資料:讀 → 唯讀帳號走 replica/SIT;寫 → 禁直寫,一律走 API 或包成 workflow。
-- 專案自有 state:用 vibe DB(每專案一個 schema,連線 vault 注入,分 sit/stage/prod);DB 檔(*.db/*.sqlite*)不進 git。
-- migration 只准從已 merge 的 main 跑;優先用啟動時 ensure(`ADD COLUMN IF NOT EXISTS`)。
+- 公司生產資料：讀用唯讀帳號與允許環境；寫禁直寫，走 API/正門或受治理 workflow。
+- 專案自有 state：使用 PostgreSQL schema；連線資訊由 env/vault 注入。
+- migration 只從已 merge 的 main 由 CI/平台執行；app runtime 不執行 DDL。
 
-## 資料落點三層(想「存哪裡」時照這張表,不要發明第四種)
+## 資料落點
 
-| 資料 | 落點 | 介面 |
+| 資料 | Cloud-ready 落點 | 介面 |
 |---|---|---|
-| 執行狀態、結構化紀錄(source of truth) | vibe DB(專案 schema) | `ctx.db` |
-| 檔案類產出:報表、憑證、截圖 | S3 | `ctx.storage.put()` |
-| 給人看/給 OP 用的表格 | Google Sheet/Drive(Shared Drive,單向匯出視圖,**不是資料庫**) | `ctx.sheet.export()` |
+| 執行狀態、結構化紀錄 | PostgreSQL | `ctx.db` |
+| 檔案類產出：報表、憑證、截圖、PDF | S3 | `ctx.storage.put()` |
+| 給人看/給 OP 用的表格 | Google Sheet/Drive 匯出視圖 | `ctx.sheet.export()` |
+| 執行期 log | stdout/stderr + audit log | `ctx.log` |
 
-- Google 一律走共用 service account + 專案的 Shared Drive 資料夾;禁個人 OAuth、禁 domain-wide delegation。
-- 拿檔防呆:Drive/Sheet 找檔一律用 file ID 或專案資料夾內固定路徑,**禁檔名模糊搜尋**;workflow 吃外部輸入檔前必驗 schema(欄位/筆數/日期合理性),不對就拋 typed error,不要帶著錯資料往下跑。
+Google Sheet/Drive 是匯出視圖，不是資料庫；壞了要能從 PostgreSQL/S3 重導。
+
+## PII 與 Audit Log
+
+- script 內部處理 PII 時可以用裸資料，例如填表、比對名單、送 API。
+- 一旦寫入 `ctx.log`、status page、Slack/Email notification、run summary，必須遮罩 PII 與 secret。
+- `PROJECT.yaml touches.pii: true` 時，狀態頁只放統計、筆數、錯誤類型、來源系統連結，不放客人明細。
+- 需要追蹤特定人/訂單時，優先使用來源系統 record id、hash、末四碼或摘要，不記完整個資。
 
 ## 排程與執行鐵則
 
-- 排程一律宣告在 PROJECT.yaml `schedules`(task→cron),由 deploy 同步到 Dkron;**禁止私有 cron**(筆電 crontab、自開 EC2 cron)。不用 GitHub Actions cron(會延遲)。
-- 每個排程 task 必須:冪等可重跑、跑掛 Slack 通知、執行結束發 vibefile 狀態頁。
-- 統一進入點是 `./run.sh <task>`;新增排程任務=在 run.sh 加 case + PROJECT.yaml 加一條 schedules。
+- 排程一律宣告在 `PROJECT.yaml schedules`，並實作對應 `POST /api/jobs/<name>` endpoint。
+- Cloud 執行由 Kubernetes CronJob 呼叫 HTTP endpoint，帶 `Authorization: Bearer $CRON_SECRET`。
+- 每個 job endpoint 必須冪等、可重跑、有界執行，回傳 JSON 摘要並寫 masked audit log。
+- 禁止私有 cron、container 內 crond、APScheduler 常駐、`setInterval` 當排程、GitHub Actions cron 作為唯一排程。
+- Dkron/vibefile/runner server 不是 cloud-ready 主線；若專案真的需要，先查 `docs/roadmap.md` 並標成 legacy/fallback。
 
-## 觀測與 log 鐵則
+## 觀測與錯誤鐵則
 
-- log 一律經 `ctx.log`(結構化 JSONL:ts/run_id/workflow/step/level/msg/data),步驟用 `with ctx.log.step("login"):` 包 — 不要自己 print/logging.basicConfig。log 執行中寫本機、結束由框架上傳 S3;vibe DB 只存 run 摘要。
-- 排程任務與長批次必產狀態頁(HTML → vibefile,`folder=專案id`、`filename=<run_id>.html`)— 由框架 run wrapper 自動處理,workflow 內不用寫。
-- 失敗三件套由框架自動做(截圖+最後 HTML 進 S3、Slack 告警、狀態頁重跑指引),**workflow 內不要自己 try/except 吞錯** — 拋 typed error 讓框架接手。不自動 retry;送單後狀態不明絕不重試。
-- 狀態頁上**絕不放憑證/token;pii: true 的專案只放統計不放明細**(vibefile 無 per-project 授權,全公司登入者可見)。
+- 使用 `ctx.log.step("name")` 包住重要步驟；不要自己散落裸 `print` 或 `logging.basicConfig`。
+- workflow 內不要吞錯。拋 typed error，讓框架做截圖、告警、狀態記錄與重跑判斷。
+- 送出後狀態不明的寫入型錯誤不可自動 retry。
+- error tracking DSN 走 env，沒設定時安靜停用。
 
-## 支援的工具(ctx 能力速查表 — 隨 kkday-connectors 版本更新)
+## 支援的工具(ctx 能力速查表)
 
 | 介面 | 用途 | 範例 |
 |---|---|---|
-| `ctx.secrets.get(ref)` | 取憑證(vault 引用) | `token = ctx.secrets.get("vault://proj/KEY")` |
-| `ctx.browser` | 受管 headless 瀏覽器(Playwright) | `page = ctx.browser.new_page()` |
-| `ctx.notify(msg)` | Slack 通知(team channel) | `ctx.notify("3 筆完成")` |
-| `ctx.db` | vibe DB(專案 schema) | `ctx.db.execute(...)` |
-| `ctx.storage.put(path)` | 上傳 S3 產出,回連結 | `url = ctx.storage.put("report.pdf")` |
+| `ctx.secrets.get(ref)` | 取憑證(vault/env 引用) | `token = ctx.secrets.get("vault://proj/KEY")` |
+| `ctx.browser` | 受管 headless browser | `page = ctx.browser.new_page()` |
+| `ctx.notify(msg)` | 通知 team channel | `ctx.notify("3 筆完成")` |
+| `ctx.db` | PostgreSQL 專案 schema | `ctx.db.execute(...)` |
+| `ctx.storage.put(path)` | 上傳 S3 產出 | `url = ctx.storage.put("report.pdf")` |
 | `ctx.sheet.export(rows, name)` | 匯出 Google Sheet 視圖 | `ctx.sheet.export(rows, "monthly")` |
-| `ctx.mail.send(to, subj, body)` | 發信(SA+白名單寄件人) | `ctx.mail.send(...)` |
-| `ctx.log.step(name)` | 結構化 log 步驟 | `with ctx.log.step("login"): ...` |
-| `ctx.checkpoint(preview)` | 確認點(紅區必用) | `ctx.checkpoint(dry_run_result)` |
+| `ctx.mail.send(to, subj, body)` | 發信 | `ctx.mail.send(...)` |
+| `ctx.log.step(name)` | masked structured audit log | `with ctx.log.step("login"): ...` |
+| `ctx.checkpoint(preview)` | 紅區確認點 | `ctx.checkpoint(dry_run_result)` |
 
-> 尚未實作的介面(ctx.db/storage/sheet/mail/log)呼叫時會拋 NotImplementedError — 介面先凍結,實作隨 kkday-connectors 補齊;workflow 程式碼照寫,不要繞去自己 import 別的套件。
+> 尚未實作的介面會拋 typed `NotYetImplemented`。不要繞過 `ctx.*` 直接 import vendor SDK；把缺口記到 framework roadmap。
 
 <!-- ============================================================
      專案自訂段(以下由專案自行維護)

@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Workflow Manifest",
+  "type": "object",
+  "required": ["version", "workflow", "permissions"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "workflow": {
+      "type": "object",
+      "required": ["id", "description", "risk_tier"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9-]+(\\.[a-z0-9-]+)*$"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "risk_tier": {
+          "type": "string",
+          "enum": ["green", "yellow", "red"]
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "properties": {
+        "credentials": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(vault://|secret://)[a-zA-Z0-9_/-]+$"
+          }
+        },
+        "network": {
+          "type": "object",
+          "properties": {
+            "allow_hosts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "needs_browser": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+inputs:
+  eff_date: "113/08/20"
+  exp_date: "113/08/25"
+  excel_file_path: "/tmp/fake_excel.xlsx"
+  tra_no: "TRA_12345"
+  represent_mem: "王大明"
+  total_mem: 10
+
+expected_outputs:
+  status: "success"

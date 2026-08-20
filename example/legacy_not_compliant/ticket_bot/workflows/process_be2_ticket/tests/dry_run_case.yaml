@@ -1,0 +1,7 @@
+inputs:
+  order_id: "23KK123456789"
+  wantan_type: "mituan"
+  follow_type: "page"
+
+expected_outputs:
+  status: "success"

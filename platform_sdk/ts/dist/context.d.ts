@@ -9,12 +9,21 @@ export declare class Logger {
     error(msg: string): void;
 }
 export declare class Notify {
-    slack(msg: string): void;
+    logger: Logger;
+    constructor(logger: Logger);
+    slack(msg: string): Promise<void>;
+}
+export declare class StorageManager {
+    logger: Logger;
+    basePath: string;
+    constructor(logger: Logger);
+    writeText(filename: string, content: string): string;
 }
 export declare class Context {
     secrets: SecretManager;
     logger: Logger;
     notify: Notify;
+    storage: StorageManager;
     browser: BrowserContext | null;
     private _playwrightBrowser;
     constructor(allowedSecrets: string[]);
