@@ -21,6 +21,10 @@ case "$TASK" in
     # 由 worker 派工的單一 run:載入 skill、執行、更新狀態機、發狀態頁
     exec python -m platform_sdk.runner --project-yaml PROJECT.yaml "$@"
     ;;
+  migrate)
+    # DB migration runner (Spec §2.5)
+    exec python scripts/migrate.py
+    ;;
 
   # ---- 專案自訂 task(範例;task 名對應 PROJECT.yaml schedules 的 key) ----
   # daily_report)

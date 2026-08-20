@@ -6,6 +6,16 @@ from platform_sdk import run_workflow
 
 app = Flask(__name__)
 
+# [Spec §2.2] Fail fast: 缺必要 env 啟動就報錯
+_REQUIRED_ENV = ["CRON_SECRET"]
+
+def _validate_env():
+    missing = [k for k in _REQUIRED_ENV if not os.environ.get(k)]
+    if missing:
+        raise RuntimeError(f"啟動失敗: 缺少必要環境變數: {', '.join(missing)}。請檢查 .env.example。")
+
+_validate_env()
+
 # [Rule] 必須提供無外部依賴的 /health
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -16,11 +26,14 @@ def health_check():
 @app.route('/api/jobs/<job_name>', methods=['POST'])
 def trigger_job(job_name):
     # 驗證 Token
-    auth_header = request.headers.get('Authorization')
+    auth_header = request.headers.get('Authorization', '')
     expected_token = os.environ.get('CRON_SECRET')
     
     if not expected_token:
         return jsonify({"error": "CRON_SECRET not configured"}), 500
+
+    if not auth_header:
+        return jsonify({"error": "Unauthorized"}), 401
         
     if not hmac.compare_digest(auth_header, f"Bearer {expected_token}"):
         return jsonify({"error": "Unauthorized"}), 401

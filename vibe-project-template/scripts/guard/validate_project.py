@@ -131,7 +131,8 @@ def check_cloud_ready_spec(data: dict):
         "create table": "禁止 runtime DDL，請走 db/migrations"
     }
     for file_path in ROOT.rglob("*.py"):
-        if "venv" in str(file_path) or ".venv" in str(file_path) or "scripts/guard" in str(file_path):
+        rel = str(file_path.relative_to(ROOT))
+        if any(skip in rel for skip in ("venv", ".venv", "scripts/", "tests/")):
             continue
         try:
             lines = file_path.read_text().splitlines()

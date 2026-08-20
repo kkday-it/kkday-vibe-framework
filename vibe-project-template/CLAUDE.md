@@ -70,7 +70,7 @@ Google Sheet/Drive 是匯出視圖，不是資料庫；壞了要能從 PostgreSQ
 - Cloud 執行由 Kubernetes CronJob 呼叫 HTTP endpoint，帶 `Authorization: Bearer $CRON_SECRET`。
 - 每個 job endpoint 必須冪等、可重跑、有界執行，回傳 JSON 摘要並寫 masked audit log。
 - 禁止私有 cron、container 內 crond、APScheduler 常駐、`setInterval` 當排程、GitHub Actions cron 作為唯一排程。
-- Dkron/vibefile/runner server 不是 cloud-ready 主線；若專案真的需要，先查 `docs/roadmap.md` 並標成 legacy/fallback。
+- 排程一律由 Kubernetes CronJob 觸發 HTTP endpoint（`POST /api/jobs/<name>`），不使用 in-process timer、PaaS cron 宣告、或任何其他排程機制。
 
 ## 觀測與錯誤鐵則
 

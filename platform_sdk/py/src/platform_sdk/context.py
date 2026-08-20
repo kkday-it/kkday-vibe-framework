@@ -45,18 +45,18 @@ class SecretManager:
 
 
 class LogManager:
-    """結構化 JSONL log(§12-2):每行 ts/run_id/workflow/step/level/msg/data。
+    """結構化 JSON log(§2.9):每行 ts/run_id/workflow/step/level/msg/data。
 
-    執行中寫本機 runs/<run_id>.jsonl(結束由框架上傳 S3 — MVP 先留本機);
-    同時鏡射到 stdout 供 K8s 執行紀錄。
+    Cloud-Ready: log 只寫 stdout/stderr（Spec §2.9 硬約束 #10）。
+    K8s 的 log collector 會自動收集 stdout。
     """
 
     def __init__(self, workflow_id, run_id, log_dir="/tmp/vibe_logs"):
         self._workflow = workflow_id
         self._run_id = run_id
         self._step = None
+        # path 保留供 runner summary 參照，但 LogManager 本身不寫檔
         self._dir = Path(os.environ.get("VIBE_LOG_PATH", log_dir))
-        self._dir.mkdir(parents=True, exist_ok=True)
         self.path = self._dir / f"{run_id}.jsonl"
         self._stdout = logging.getLogger(f"workflow.{workflow_id}")
         self._stdout.propagate = False  # 不往 root 冒泡,避免重複輸出
@@ -71,8 +71,8 @@ class LogManager:
                "step": self._step, "level": level, "msg": str(msg)}
         if data:
             rec["data"] = data
-        with self.path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        # Spec §2.9: log 只寫 stdout，以 JSON 格式輸出
+        print(json.dumps(rec, ensure_ascii=False), flush=True)
         getattr(self._stdout, level.lower(), self._stdout.info)(f"[{self._step or '-'}] {msg}")
 
     def info(self, msg, **data):

@@ -1,9 +1,16 @@
 .git
 .gitignore
 .env
+.env.*
 .DS_Store
 __pycache__/
 *.pyc
 *.pyo
 venv/
 .venv/
+tests/
+docs/
+*.md
+scripts/
+.github/
+.devcontainer/
