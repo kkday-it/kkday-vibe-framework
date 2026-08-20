@@ -1,9 +1,0 @@
-version: "1.0"
-project:
-  name: "fubon_app_ts"
-  description: "富邦旅平險自動投保 (TypeScript 版)"
-  owner: "Ina Huang"
-
-app:
-  type: "worker"
-  entrypoint: "src/worker.ts"
