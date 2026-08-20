@@ -33,12 +33,14 @@ class SecretManager:
     """
 
     def get(self, ref, default=None):
-        key = ref.split("/")[-1] if str(ref).startswith("vault://") else str(ref)
         if not str(ref).startswith("vault://"):
-            warnings.warn(f"[secrets] 建議用 vault:// 引用(收到: {ref})", stacklevel=2)
+            warnings.warn(f"[secrets] 必須用 vault:// 引用(收到: {ref})", stacklevel=2)
+            
+        key = ref.split("/")[-1] if str(ref).startswith("vault://") else str(ref)
         val = os.environ.get(key, default)
+        
         if val is None:
-            logging.warning(f"[secrets] 無法取得機密: {ref}(env {key} 未設定)")
+            raise ValueError(f"[secrets] 無法取得機密: {ref} (環境變數 {key} 未設定)")
         return val
 
 
@@ -49,11 +51,11 @@ class LogManager:
     同時鏡射到 stdout 供 Dkron 執行紀錄。
     """
 
-    def __init__(self, workflow_id, run_id, log_dir="runs"):
+    def __init__(self, workflow_id, run_id, log_dir="/tmp/vibe_logs"):
         self._workflow = workflow_id
         self._run_id = run_id
         self._step = None
-        self._dir = Path(log_dir)
+        self._dir = Path(os.environ.get("VIBE_LOG_PATH", log_dir))
         self._dir.mkdir(parents=True, exist_ok=True)
         self.path = self._dir / f"{run_id}.jsonl"
         self._stdout = logging.getLogger(f"workflow.{workflow_id}")

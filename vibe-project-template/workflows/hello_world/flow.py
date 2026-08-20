@@ -5,7 +5,7 @@ def run(ctx: Context, **kwargs):
     ctx.log.info("Hello World Workflow Started")
     
     # 示範使用 ctx.secrets
-    api_key = ctx.secrets.get("secret://hello_world_api_key", "default_mock_key")
+    api_key = ctx.secrets.get("vault://hello_world_api_key", "default_mock_key")
     ctx.log.info("Successfully loaded secrets (value is masked).")
     
     # 示範使用 ctx.storage

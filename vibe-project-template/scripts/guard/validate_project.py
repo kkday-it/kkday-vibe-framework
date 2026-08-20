@@ -63,8 +63,8 @@ def check_workflows():
             permissions = data.get("permissions", {})
             creds = permissions.get("credentials", [])
             for ref in creds:
-                if not ref.startswith("vault://") and not ref.startswith("secret://"):
-                    errors.append(f"workflows/{workflow.name}: credentials 只准 vault:// 或 secret:// 引用,不准出現值({ref[:20]}…)")
+                if not ref.startswith("vault://"):
+                    errors.append(f"workflows/{workflow.name}: credentials 只准 vault:// 引用,不准出現值({ref[:20]}…)")
                     
         except Exception as e:
             errors.append(f"workflows/{workflow.name}: manifest 解析失敗 ({e})")
@@ -128,16 +128,20 @@ def check_cloud_ready_spec(data: dict):
         "127.0.0.1": "禁用 127.0.0.1，應走內部 DNS",
         "sqlite": "禁用 SQLite，Cloud-Ready 請走 PostgreSQL",
         "./uploads": "禁用本地寫入 ./uploads，請使用 ctx.storage / S3",
-        "CREATE TABLE": "禁止 runtime DDL，請走 db/migrations"
+        "create table": "禁止 runtime DDL，請走 db/migrations"
     }
     for file_path in ROOT.rglob("*.py"):
         if "venv" in str(file_path) or ".venv" in str(file_path) or "scripts/guard" in str(file_path):
             continue
         try:
-            content = file_path.read_text().lower()
-            for pattern, msg in anti_patterns.items():
-                if pattern in content:
-                    errors.append(f"Cloud-Ready 反模式 ({file_path.name}): {msg}")
+            lines = file_path.read_text().splitlines()
+            for line in lines:
+                if line.strip().startswith("#"):
+                    continue
+                content = line.lower()
+                for pattern, msg in anti_patterns.items():
+                    if pattern in content:
+                        errors.append(f"Cloud-Ready 反模式 ({file_path.name}): {msg}")
         except Exception:
             pass
             

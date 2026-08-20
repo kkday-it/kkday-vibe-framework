@@ -1,5 +1,7 @@
 # kkday-connectors: 公司共用 connector 套件(send_slack/send_mail/publish_vibefile + platform_sdk shim/worker/runner)
-# 尚未發佈;發佈後取消註解
-# kkday-connectors>=0.1.0
+# 尚未發佈;發佈前請安裝 platform_sdk 原始碼版本:
+git+https://github.com/kkday-it/kkday-vibe-framework.git#subdirectory=platform_sdk/py
 
-pyyaml>=6.0
+pyyaml==6.0.1
+flask==3.0.0
+gunicorn==21.2.0

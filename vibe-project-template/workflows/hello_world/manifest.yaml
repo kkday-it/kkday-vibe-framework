@@ -6,7 +6,7 @@ workflow:
   risk_tier: "green"
 permissions:
   credentials:
-    - "secret://hello_world_api_key"
+    - "vault://hello_world_api_key"
   network:
     allow_hosts:
       - "api.github.com"

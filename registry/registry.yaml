@@ -2,7 +2,6 @@
 # collect_registry.py 逐一抓 PROJECT.yaml 彙整成全公司清單(M0「先看見」)。
 # 格式:<org>/<repo>,或 local:<絕對路徑>(尚未推上 GitHub 的專案)。
 repos:
-  - local:/Users/lance.chien/Documents/Projects/vibe-framework/example/bpm_app
-  - local:/Users/lance.chien/Documents/Projects/vibe-framework/example/insurance_app
-  - local:/Users/lance.chien/Documents/Projects/vibe-framework/example/ticket_bot
-  # - kkday-it/some-vibe-project
+  - company-org/vibe-example-bpm
+  - company-org/vibe-example-insurance
+  - company-org/vibe-ticket-bot

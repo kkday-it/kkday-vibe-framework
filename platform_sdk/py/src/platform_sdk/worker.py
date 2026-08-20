@@ -1,13 +1,11 @@
-"""標準 worker — 派工器(§7.5/§12):每專案單飛(Dkron concurrency=forbid),秒級退出。
+"""[Legacy] 標準 worker — 派工器:早期預留作為本機 worker，
+現行架構下已被 Kubernetes CronJob + api.py 取代。
 
-正式職責(vibe DB + ingest 就緒後實作):
+正式職責(若未來需要從 DB 撿件):
   1. 讀該專案 pending 表,row lock 撿 `ready` 的 run
-  2. 對每個 run 經 Dkron API 建立並觸發一次性 run job
-     (名=<專案id>.run.<run_id>,@manually,命令=./run.sh run --run-id=<id>)
-     — 每個 run 都是一等 Dkron 執行:可見、可停、跑掛告警;絕不 fork 子行程
+  2. 對每個 run 呼叫 platform_sdk.run_workflow (或拋出新的 K8s Job)
   3. 在途 run 數控制在 manifest max_parallel(預設 3)內
   4. 從 DB 全量重建 vibefile index 頁
-  5. 回收已完成的一次性 job
 
 MVP:佔位 — 印出職責並立即退出(符合「秒退」形狀,不做常駐迴圈)。
 """

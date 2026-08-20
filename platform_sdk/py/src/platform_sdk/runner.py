@@ -29,15 +29,17 @@ def run_workflow(workflow_id, inputs=None, run_id=None):
         mod = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = mod
         spec.loader.exec_module(mod)
-        if not hasattr(mod, "flow"):
-            raise WorkflowError("flow.py 未定義 flow(ctx, **inputs) 函數")
+        if not hasattr(mod, "run"):
+            raise WorkflowError("flow.py 未定義 run(ctx, **inputs) 函數")
 
-        result = mod.flow(ctx, **inputs)
+        result = mod.run(ctx, **inputs)
         return _finish(ctx, t0, result if isinstance(result, dict) else {"status": "success", "result": result})
 
     except Exception as e:
         # 失敗三件套:① 現場保全(截圖+HTML) ② Slack 告警 ③ 狀態記錄供狀態頁
-        artifacts = ctx.browser.capture_failure(Path("runs") / ctx.run_id)
+        log_dir = Path(os.environ.get("VIBE_LOG_PATH", "/tmp/vibe_logs"))
+        log_dir.mkdir(parents=True, exist_ok=True)
+        artifacts = ctx.browser.capture_failure(log_dir / ctx.run_id)
         ctx.log.error(f"run failed: {e}", error_type=type(e).__name__, artifacts=artifacts)
         ctx.notify(f"🔴 {workflow_id} 失敗 (run {ctx.run_id})\n錯誤: {type(e).__name__}: {e}\n"
                    f"log: {ctx.log.path}" + (f"\n現場: {', '.join(artifacts)}" if artifacts else ""))
@@ -52,8 +54,9 @@ def _finish(ctx, t0, result):
     summary = {"run_id": ctx.run_id, "workflow": ctx.workflow_id, "status": result["status"],
                "duration_s": duration, "log": str(ctx.log.path)}
     # run 摘要(vibe DB 就緒前先落地本機,供狀態頁 index 重建)
-    Path("runs").mkdir(exist_ok=True)
-    (Path("runs") / f"{ctx.run_id}.summary.json").write_text(
+    log_dir = Path(os.environ.get("VIBE_LOG_PATH", "/tmp/vibe_logs"))
+    log_dir.mkdir(parents=True, exist_ok=True)
+    (log_dir / f"{ctx.run_id}.summary.json").write_text(
         json.dumps({**summary, **{k: v for k, v in result.items() if k != "status"}},
                    ensure_ascii=False, indent=2))
     ctx.log.info("run end", **summary)

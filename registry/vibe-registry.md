@@ -4,6 +4,6 @@
 
 | 專案 | team | owner | 風險 | 內部 API | 外站 | 串接 | DB | PII | 排程 |
 |---|---|---|---|---|---|---|---|---|---|
-| team.bpm-app | operation-team | your.name | red | odoo.eip.kkday.net | - | - | vibe-db/bpm-app | ⚠️ | - |
-| team.insurance-app | operation-team | your.name | yellow | - | b2b.518fb.com | - | vibe-db/insurance-app | ⚠️ | - |
-| team.ticket-bot | customer-service | your.name | red | be2.kkday.com | - | slack | vibe-db/ticket-bot | ⚠️ | - |
+| team.bpm-app | operation-team | your.name | red | erp.internal.company.com | - | - | vibe-db/bpm-app | ⚠️ | - |
+| team.insurance-app | operation-team | your.name | yellow | - | b2b.external-partner.com | - | vibe-db/insurance-app | ⚠️ | - |
+| team.ticket-bot | customer-service | your.name | red | api.internal.company.com | - | slack | vibe-db/ticket-bot | ⚠️ | - |

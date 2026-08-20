@@ -2,6 +2,7 @@
 .DS_Store
 
 # 專案範例與過渡期腳本 (私人)
+/example/
 /BPM py/
 insurance_gui_date_picker.py
 
