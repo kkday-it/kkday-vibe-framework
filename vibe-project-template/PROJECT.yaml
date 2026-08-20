@@ -1,0 +1,22 @@
+# 專案身分證 — 治理錨點。登錄冊掃這個檔就知道全公司 vibe coding 版圖。
+# 綠區專案只要求:這個檔 + secret scan 過。規格見 project-template-v0.md §3。
+
+id: team.project-name           # <team>.<project>,全公司唯一
+owner: your.name                # 掛名 owner(人,非團隊帳號)
+team: your-team
+status: active                  # active | archived
+risk_tier: green                # green | yellow | red
+
+# 這專案碰什麼(沒碰的留空陣列)
+touches:
+  internal_apis: []             # 例:[product-service, order-service]
+  external_sites: []            # 例:[thsr.com.tw]
+  integrations: []              # 例:[slack, gmail]  # 一律經 kkday-connectors,禁自申 token
+  databases: []                 # 例:[vibe-db/team-project, replica/order-db:ro]
+  pii: false                    # 有碰客人個資 → 強制 yellow 以上
+
+initiators: []                  # 誰能觸發/重跑(角色名單,如 [op-team, cs-team]);空 = 只有 owner 的 team
+schedules: {}                   # 空 = 無排程;task→cron map,task 名對應 ./run.sh <task>
+# schedules:
+#   worker: "* * * * *"         # 事件驅動 worker(多方參數流程用)
+#   daily_report: "0 0 * * *"   # 純排程任務

@@ -1,0 +1,37 @@
+{
+    "name": "Vibe Coding Python",
+    "image": "mcr.microsoft.com/devcontainers/python:3.11-bullseye",
+    
+    // 容器建立後要安裝的系統套件 (例如 SQLite, curl)
+    "features": {
+        "ghcr.io/devcontainers/features/sqlite:1": {}
+    },
+
+    // 容器建立後的初始化指令
+    "postCreateCommand": "pip install -r requirements.txt",
+
+    // 設定環境變數
+    "containerEnv": {
+        "PYTHONUNBUFFERED": "1",
+        "ENVIRONMENT": "development"
+    },
+
+    // VS Code / Cursor 客製化設定
+    "customizations": {
+        "vscode": {
+            // 強制幫開發者/AI 裝好必備的 IDE 擴充套件
+            "extensions": [
+                "ms-python.python",
+                "ms-python.vscode-pylance",
+                "redhat.vscode-yaml",
+                "tamasfe.even-better-toml"
+            ],
+            // 統一 IDE 設定
+            "settings": {
+                "python.defaultInterpreterPath": "/usr/local/bin/python",
+                "python.formatting.provider": "black",
+                "editor.formatOnSave": true
+            }
+        }
+    }
+}

@@ -1,0 +1,20 @@
+# Mac 系統檔
+.DS_Store
+
+# 專案範例與過渡期腳本 (私人)
+/example/
+/BPM py/
+insurance_gui_date_picker.py
+
+# 內部討論與申請文件
+paul-discussion-guide.md
+infra-request.md
+/assets/
+
+# 敏感文件
+*.pdf
+
+# 程式執行暫存
+__pycache__/
+*.pyc
+node_modules/

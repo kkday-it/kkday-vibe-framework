@@ -1,0 +1,5 @@
+# kkday-connectors: 公司共用 connector 套件(send_slack/send_mail/publish_vibefile + platform_sdk shim/worker/runner)
+# 尚未發佈;發佈後取消註解
+# kkday-connectors>=0.1.0
+
+pyyaml>=6.0

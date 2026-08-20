@@ -1,0 +1,24 @@
+# 憑證 — 永不入庫
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+credentials*
+token*
+*service-account*.json
+
+# 專案自有 state — DB 檔不進 git
+*.db
+*.sqlite
+*.sqlite3
+
+# 常見雜物
+__pycache__/
+*.pyc
+.venv/
+venv/
+node_modules/
+.DS_Store
+dist/
+build/

@@ -1,0 +1,30 @@
+# 守門 CI — 純 repo 檢查,不碰內網(deploy.yml 才碰,跑內網 CI runner)。
+# 四項:secret scan / PROJECT.yaml 驗證 / skills manifest 驗證 / 禁用套件。
+name: guard
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pyyaml
+      - name: PROJECT.yaml + skills manifest + 禁用套件
+        run: python scripts/guard/validate_project.py

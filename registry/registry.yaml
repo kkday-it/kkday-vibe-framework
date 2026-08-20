@@ -1,0 +1,8 @@
+# 登錄冊 — 存量盤點採「主動申請」制:團隊把自己的 vibe 專案 repo 登記在這裡,
+# collect_registry.py 逐一抓 PROJECT.yaml 彙整成全公司清單(M0「先看見」)。
+# 格式:<org>/<repo>,或 local:<絕對路徑>(尚未推上 GitHub 的專案)。
+repos:
+  - local:/Users/lance.chien/Documents/Projects/vibe-framework/example/bpm_app
+  - local:/Users/lance.chien/Documents/Projects/vibe-framework/example/insurance_app
+  - local:/Users/lance.chien/Documents/Projects/vibe-framework/example/ticket_bot
+  # - kkday-it/some-vibe-project
