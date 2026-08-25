@@ -177,6 +177,12 @@ DevOps cloud profile 下：
 - 本機暫存只用 `/tmp`，用完刪除，且不能假設下一個 request 還存在。
 - Google Sheet/Drive 只能作為給人看的匯出視圖，不是 source of truth；source of truth 是 PostgreSQL/S3。
 
+**拿錯檔案三重防呆**（Sheet/Drive adapter 適用）：
+
+1. **跨專案越權**：Google 存取憑證由平台/adapter 層代管，workflow 不得自己 import vendor SDK 直連。adapter 依 `PROJECT.yaml` 綁定的目標資料夾/試算表 ID 限定存取範圍，同一組憑證不因專案不同而能互相碰到彼此的資料夾。
+2. **同名檔案誤讀**：一律用 file ID 或固定路徑存取，禁止用檔名模糊搜尋（如 `name contains '名單'`）— 同名檔、舊版本並存時，搜尋結果不可預期。
+3. **來源資料本身錯誤**：adapter 邊界防不了人放錯檔案。workflow 讀入外部檔案後必須先驗 schema（欄位、筆數、日期範圍等合理性），不通過就丟 typed error 中止，不得帶著未驗證資料繼續執行；紅區 workflow 另需 dry-run/preview 讓人確認後再放行（見 §10）。
+
 ## 9. 排程規約
 
 主線：**Kubernetes CronJob → HTTP endpoint**。
