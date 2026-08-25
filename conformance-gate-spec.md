@@ -119,11 +119,13 @@
 
 **M2(conformance test harness + 遮罩能力)** — PII 遮罩「是否真的生效」的唯一可靠驗證層
 - **先建淨新增能力**:`ctx.redact(value, fields)` 與 `LogManager` 的自動遮罩(目前 `context.py` 的 `LogManager._emit` 逐字寫、零遮罩)——A2/B3/E3 全靠它,現在**不存在**,必須先實作。
-- 新增 `scripts/guard/conformance/`:對每個 governed flow 跑 fixture,執行 A2(輸入含 PII 時呼叫仍成功、且 audit/log 已遮罩)、A3(憑證形狀參數被遮罩)、B1(輸出上限)、**B4→B2→B3 的順序斷言:先用 positive fixture 確認回傳非空且含 `pii_fields`(fixture 失效=紅燈,非跳過),再驗無裸 PII、再驗 model 面已遮罩**。CI 綠燈才算過。
+- ⚠️ **`NotificationManager`(`ctx.notify`)是遮罩死角,必須與 `LogManager` 同步接上**:A2 規則明文「進 audit log / status / notification 前一律 mask」涵蓋三個面,但 `NotificationManager.__call__` 目前把呼叫端組好的 `message` 字串直送 Slack webhook(`requests.post`),完全不經任何遮罩管線,不是靠「先建 `LogManager` 自動遮罩」就能連帶涵蓋的獨立路徑。`ctx.notify()` 送出前也要跑 `ctx.redact()`,否則 A2/E1 escalation 通知本身就是一個現成的裸 PII 外洩口。狀態頁(`render_status.py`)因為是重讀 `LogManager` 已寫入的 JSONL 渲染,只要 `_emit` 遮罩到位就自動安全,不需另外處理。
+- 新增 `scripts/guard/conformance/`:對每個 governed flow 跑 fixture,執行 A2(輸入含 PII 時呼叫仍成功、且 audit/log **與 notify 訊息**已遮罩)、A3(憑證形狀參數被遮罩)、B1(輸出上限)、**B4→B2→B3 的順序斷言:先用 positive fixture 確認回傳非空且含 `pii_fields`(fixture 失效=紅燈,非跳過),再驗無裸 PII、再驗 model 面已遮罩**。CI 綠燈才算過。
 - PII/secret detector:抽成共用模組,A2/A3/B2/B3 與 gitleaks 樣式庫共用。
+- ⚠️ **補一個合規的 positive-fixture 範例**:目前全 repo 唯一合規範本是 `vibe-project-template/workflows/hello_world`(green、無 PII),`example/legacy_not_compliant/` 底下四個明確標示不合規,不能拿來驗證。conformance harness 若沒有至少一個 yellow/red + 真實 `pii_fields`/`test_fixture` 的合規 workflow 可跑,B4→B2→B3 斷言鏈只能自測合成測資,無法佐證本節末「驗收標準」的宣稱。建議 M2 交付物內含一個這樣的範例(可用 `example/legacy_not_compliant` 任一支改寫成合規版)。
 
 **M3(runtime,依賴平台)** — 光靠宣告會被繞過的那些,由權限/沙盒層兜底
-- `ctx.*` adapter 落:B1 輸出硬限、C1/C2「非 `ctx` 不能碰資料/外界」的沙盒約束(`ctx.browser.new_page()` 豁免)、C3 egress allowlist(讀 `permissions.network.allow_hosts`)、D3 runtime 半徑、E3 run ledger、A2/A3 進 log 前遮罩。
+- `ctx.*` adapter 落:B1 輸出硬限、C1/C2「非 `ctx` 不能碰資料/外界」的沙盒約束(`ctx.browser.new_page()` 豁免)、C3 egress allowlist(讀 `permissions.network.allow_hosts`)、D3 runtime 半徑、E3 run ledger。(A2/A3 遮罩已在 M2 由 `LogManager`/`NotificationManager` 一次做好,M3 conformance 只需驗證 `ctx.*` 全家族——含平台後續新增的 adapter——都經過同一遮罩管線,不重做遮罩邏輯本身。)
 - **D1 最小權限(load-bearing)**:**先把 `ctx.db` 從 `_NotYet` 佔位接上真 adapter**,再讓 agent 執行情境的 DB 連線限 read-only role / draft schema;生產寫入僅由已批准 executor 以另一組憑證執行。未宣告的直接寫入在權限層被擋。
 - 對映 [docs/roadmap.md](docs/roadmap.md) 的平台化項目。
 
