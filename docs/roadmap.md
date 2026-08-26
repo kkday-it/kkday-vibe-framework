@@ -57,16 +57,18 @@ Dkron 若未來仍需支援，定位為 legacy adapter 或特殊環境 fallback�
 待補：
 
 - `ctx.storage` → S3，使用 AWS SDK default credential chain。
-- `ctx.db` → PostgreSQL，連線池小、TLS、CRUD runtime。
-- `ctx.notify` → 公司 Slack/Email connector，token 不外露。
-- `ctx.sheet` → Google Sheet export view，不作 source of truth。
+- `ctx.db` → PostgreSQL，連線池小、TLS、CRUD runtime。**Agent flow 執行情境需 read-only role / draft schema 分離**（conformance-gate-spec.md D1 load-bearing 控制：未宣告 `effect: write` 的直寫要在權限層被擋，不能只靠宣告誠實），生產寫入只能由已批准 executor 用另一組較高權限憑證執行；`ctx.db` 從 `_NotYet` 佔位接上真 adapter 時一併做。
+- `ctx.notify` → 公司 Slack/Email connector，token 不外露；send 前跑 `ctx.redact()`(對映 conformance-gate-spec.md A2)。
+- `ctx.sheet` → Google Sheet export view，不作 source of truth；介面只接受 `PROJECT.yaml touches` 綁定的 folder/sheet ID 與 `file_id`/`path`，不暴露任意 ID 或模糊搜尋參數（對映 conformance-gate-spec.md C4）。
 - `ctx.mail` → 公司郵件 connector。
 - `ctx.log` → audit log masking、run summary、status renderer。
+- **Egress allowlist runtime enforcement**（對映 conformance-gate-spec.md C3）：runtime 依 `manifest permissions.network.allow_hosts` 過濾出網，未宣告 host 一律拒（deny-by-default）。
 
 完成條件：
 
 - workflow 不需要直接 import vendor SDK。
 - guard 能阻擋黃/紅區 workflow 直接使用禁用 SDK。
+- agent 執行情境無法繞過宣告直接寫生產 DB（D1 權限層驗證）。
 
 ## R5. PII Masking 深化
 
@@ -129,6 +131,7 @@ Cloud-ready 版方向：
 - run-level cancel/retry。
 - 重跑建立新 run，引用原 run。
 - audit viewer 顯示 masked log、狀態、來源系統連結。
+- **Run ledger 結構**（對映 conformance-gate-spec.md E3）：每次執行至少記 `run_id / actor / 處理數 / 失敗數 / 結果`，PII 一律 mask；需搭配一條 conformance test 斷言任一 flow 執行後平台輸出確實存在這筆完整紀錄，E3 才能從「—」升成 `error` gate（目前無此測試，見 conformance-gate-spec.md E3 的誠實標註）。
 
 ## R10. Vibefile / Dkron Legacy Adapter
 
