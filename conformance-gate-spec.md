@@ -37,10 +37,12 @@
 | # | 規則 | 宣告於 | 自動檢查 | 嚴重度 | gate |
 |---|---|---|---|---|---|
 | **A1** | 工具輸入**只收 reference,不收資料本體**。input schema 不得有承接整批資料的自由欄位(大 string / 任意長度 array / 無邊界 object)。這是把「模型手上流過的 PII 量」壓到最小的**主要**手段(見 A2 註)。 | `manifest` 的 workflow 級 `inputs.<field>` | guard 掃 `inputs` 各欄位:`type: string` 欄位若無 `maxLength`(或 > 512)且非白名單語意欄位 → 命中;`type: array` 欄位(不分 items 型別)無 `maxItems` → 命中(防止用 `list[str]` 之類簡單陣列夾帶整批);**`type: object` 欄位若無 `maxProperties` 且無 `additionalProperties: false` → 命中**(否則 agent 能塞任意深度/大小的自由 JSON payload,完全繞過 reference-only 的意圖,string/array 的邊界防線白做)。 | green: warning<br>yellow+: error | green(agent flow) |
-| **A2** | **輸入端的 PII 走「遮罩」不走「阻擋」**:碰 PII 的工具,其輸入值進 audit log / status / notification 前一律 mask(沿用 §3);**不得**因輸入值命中 PII regex 就拒絕該次呼叫。 | `ctx.log` / `ctx` audit 層 | conformance test:對工具餵含 PII 的輸入,斷言 (a) 呼叫**正常執行**、(b) audit/status/notification 內該值已遮罩。 | yellow+: error | yellow |
+| **A2** | **輸入端的 PII 走「遮罩」不走「阻擋」**:碰 PII 的工具,其輸入值進 audit log / status / notification 前一律 mask(沿用 §3);**不得**因輸入值命中 PII regex 就拒絕該次呼叫。⚠️ **嚴重度降為 warning(不擋 merge)**:使用者是內部員工、操作在內網,audit log 才是這條規則真正要顧的面(內部集中查詢/長期保留、暴露面比較大);status page/notification 相對次要。遮罩仍是**建議**、guard 仍會標記未遮罩情況,但不阻擋——理由見 §4。 | `ctx.log` / `ctx` audit 層(audit log 為主,status/notification 次要) | conformance test:對工具餵含 PII 的輸入,斷言 (a) 呼叫**正常執行**、(b) audit log 內該值已遮罩(命中未遮罩 → warning,不擋)。 | warning(全 tier) | green(agent flow) |
 | **A3** | **憑證形狀的輸入值一律 flag + mask(defense-in-depth,非 leak 防線)**:token / key / password / `vault://` 以外的 secret ref 出現在工具參數 = 設計錯誤(憑證應走 `vault://`),記 warning 並遮罩;不阻擋執行。 | `ctx` audit 層 + conformance test | 沿用 gitleaks 樣式庫掃參數值;命中 → warning + 遮罩入 log。 | warning | green |
 
 > **為什麼輸入端不阻擋(A2/A3 的關鍵前提):** 工具輸入是 LLM **產生**的,送達工具前**早已在 model context 裡(已離境)**——在工具入口阻擋它不會挽回任何洩漏,只會癱瘓合法查詢(如以 email/手機當自然鍵查客人)。因此輸入端的洩漏控制手段是 **A1(從源頭減少模型碰到的 PII 量)+ 進 audit/log 前遮罩**,而非拒絕呼叫。真正的離境防線在輸出端(B)與資料流封鎖(C)。
+
+> **A2 為什麼連「遮罩」都只是建議(2026-08-28 決定,見 §4):** 使用者全是內部員工、操作在公司內網,audit log 未遮罩的曝險本質是「內部人看內部資料」,不是外洩給不特定第三方——跟這條規則原本假設的風險等級不對稱。真正需要嚴管的是「資料離開公司網路」這件事,對映的是 B(輸出到 model context)而非 A(內部留存)。
 
 ### B. 輸出閘門(`tool_result` → model context)
 
@@ -49,8 +51,8 @@
 | # | 規則 | 宣告於 | 自動檢查 | 嚴重度 | gate |
 |---|---|---|---|---|---|
 | **B1** | `tool_result` **筆數 / 大小上限**(預設 ≤ 50 rows 或 ≤ 32 KB;可於 manifest 調高但需 reviewer 批註)。結構性逼工具走 handle / 摘要,而非回傳整批。**上限卡在「flow 回傳給 model context 的最終值」,不是 `ctx.db`/`ctx.sheet` 這些資料抓取 adapter 本身**——workflow 內部要在記憶體裡拿 500 筆做彙總、篩選、算統計完全合法(data plane,見 §1),只有最後回給 agent 的 `tool_result` 要卡量;若卡在 `ctx.*` 抓取層,workflow 連正常的內部彙總都做不到。 | flow 執行框架的**回傳邊界**(即 `flow()` 函式的 return 值,進 model context 前的最後一關)+ `manifest` `workflow.output_limit` | (a) 執行期:框架在 `flow()` 回傳之後、组成 `tool_result` 之前量測,超過即截斷並回錯誤,強制開發者改設計(**不在** `ctx.db.query()`/`ctx.sheet.get()` 等中間呼叫點卡)。(b) CI:conformance test 斷言超限 flow 會失敗。 | 一律 error | green(agent flow) |
-| **B2** | **no-PII-in-tool_result**:每個 governed tool 的輸出經共用 PII detector(見 §5),不得含裸 PII。**這是 PII 遮罩是否生效的唯一可靠驗證。** | conformance test harness(CI)+ **positive fixture**(見 B4,僅 PII-touching workflow 適用) | **依 B3/B4 是否適用該 workflow 分兩支,不是所有 workflow 都跑同一套**:① **workflow 標了 `outputs.*.pii: true`(B3/B4 適用)**——兩段斷言,順序不可顛倒:(1) 先斷言工具回傳**非空、且含 `pii_fields` 宣告的欄位**(證明真的取到資料);(2) 再斷言輸出過 detector 無裸 PII。**只有 (1) 通過才算數**——否則工具回 404/空清單會讓 detector「因為沒東西可找而通過」,是假性綠燈。命中 → 紅燈。② **workflow 沒標 `outputs.*.pii: true`(未宣告碰 PII,無 `pii_fields`/`test_fixture` 可用)**——不跑 (1) 的非空斷言(該工具本來就不承諾回傳 PII 資料),直接拿它既有的一般測試輸出過 detector,命中裸 PII → 視為**未宣告卻意外洩漏**,一樣紅燈/warning(依 gate);沒命中則過,不因為沒有 `pii_fields` 就被 (1) 卡死產生假性紅燈。 | ①②皆:yellow+: error<br>green: warning | yellow(即 `touches.pii: true`) |
-| **B3** | **宣告式 PII 欄位 + 預設遮罩**:碰 PII 的工具須宣告 `pii_fields`,framework 對 model 面自動 `redact()`,完整值只在人工批准面板顯示。**觸發層級是 workflow,不是專案**——`touches.pii: true` 只代表「這個專案裡有工作流碰 PII」,不代表專案裡每一個 workflow 都碰 PII;硬性要求所有 flow 都宣告 `pii_fields` 會逼不碰 PII 的 flow(如純打公開資料的查詢)也要生一組假 `pii_fields`,規則本身變成噪音。 | `manifest` `workflow.pii_fields`(或標 `outputs.<field>.pii: true`) | (a) **靜態(guard)分兩層**:① **per-workflow 觸發**——任一 workflow 的 manifest 若標了 `outputs.<field>.pii: true`(或宣告非空 `workflow.pii_fields`),該 workflow 必須有非空 `pii_fields`,缺 → 紅燈;沒標 `outputs.*.pii` 的 workflow 不受此規則約束。② **專案級一致性檢查**——`touches.pii: true` 的專案裡,若掃過所有 workflow 都沒有任何一個標 `outputs.*.pii: true`,→ warning(旗標形同虛設,提示 team 要嘛補標、要嘛拿掉 `touches.pii`)。(b) **遮罩是否真的生效,一律靠 B2 的兩段斷言驗證**(先取到含 PII 的真資料、再驗已遮罩)——**不做**「靜態偵測程式碼是否包了 `ctx.redact()`」(動態語言下 `safe = ctx.redact(x); return safe` 或包在 helper 都會誤判,不可靠)。 | ①per-workflow: yellow+ error<br>②專案級: warning | yellow |
+| **B2** | **no-PII-in-tool_result**:每個 governed tool 的輸出經共用 PII detector(見 §5),不得含裸 PII。**這是 PII 遮罩是否生效的唯一可靠驗證。** ⚠️ **嚴重度降為 warning(不擋 merge,2026-08-28 決定,見 §4)**:理由有二——(1) 只要 workflow 遵守 A1 的 reference-only 慣例(如貼 URL/handle,不上傳整批檔案),`tool_result` 本身能承載的資料量已經從源頭被壓低,實際離境的 PII 量有限;(2) 現階段技術上擋不住 AI agent 產生的內容,硬性阻擋只會製造假性摩擦,不會真的補上這道防線(同 §4「框架強制不了」的既有原則,現在延伸適用到這裡)。 | conformance test harness(CI)+ **positive fixture**(見 B4,僅 PII-touching workflow 適用) | **依 B3/B4 是否適用該 workflow 分兩支,不是所有 workflow 都跑同一套**:① **workflow 標了 `outputs.*.pii: true`(B3/B4 適用)**——兩段斷言,順序不可顛倒:(1) 先斷言工具回傳**非空、且含 `pii_fields` 宣告的欄位**(證明真的取到資料);(2) 再斷言輸出過 detector 無裸 PII。**只有 (1) 通過才算數**——否則工具回 404/空清單會讓 detector「因為沒東西可找而通過」,是假性綠燈。命中 → **warning**(記錄供 review,不擋 merge)。② **workflow 沒標 `outputs.*.pii: true`(未宣告碰 PII,無 `pii_fields`/`test_fixture` 可用)**——不跑 (1) 的非空斷言(該工具本來就不承諾回傳 PII 資料),直接拿它既有的一般測試輸出過 detector,命中裸 PII → 視為**未宣告卻意外洩漏**,同樣 warning;沒命中則過,不因為沒有 `pii_fields` 就被 (1) 卡死產生假性紅燈。 | ①②皆:warning(全 tier,不擋) | green(agent flow) |
+| **B3** | **宣告式 PII 欄位 + 預設遮罩**:碰 PII 的工具須宣告 `pii_fields`,framework 對 model 面自動 `redact()`,完整值只在人工批准面板顯示。**觸發層級是 workflow,不是專案**——`touches.pii: true` 只代表「這個專案裡有工作流碰 PII」,不代表專案裡每一個 workflow 都碰 PII;硬性要求所有 flow 都宣告 `pii_fields` 會逼不碰 PII 的 flow(如純打公開資料的查詢)也要生一組假 `pii_fields`,規則本身變成噪音。 | `manifest` `workflow.pii_fields`(或標 `outputs.<field>.pii: true`) | (a) **靜態(guard)分兩層**:① **per-workflow 觸發**——任一 workflow 的 manifest 若標了 `outputs.<field>.pii: true`(或宣告非空 `workflow.pii_fields`),該 workflow 必須有非空 `pii_fields`,缺 → 紅燈;沒標 `outputs.*.pii` 的 workflow 不受此規則約束。② **專案級一致性檢查**——`touches.pii: true` 的專案裡,若掃過所有 workflow 都沒有任何一個標 `outputs.*.pii: true`,→ warning(旗標形同虛設,提示 team 要嘛補標、要嘛拿掉 `touches.pii`)。(b) **遮罩是否真的生效,一律靠 B2 的兩段斷言驗證**(先取到含 PII 的真資料、再驗已遮罩)——**不做**「靜態偵測程式碼是否包了 `ctx.redact()`」(動態語言下 `safe = ctx.redact(x); return safe` 或包在 helper 都會誤判,不可靠)。⚠️ **B3① 的宣告要求維持 error,不隨 A2/B2 降級**:宣告 `pii_fields` 是零成本的 metadata(填一個欄位),不是「遮罩正確與否」本身,不會製造 A2/B2 降級想避免的那種摩擦;B2(遮罩內容是否真的乾淨)才是被降級的部分——「有沒有誠實標註碰了 PII」跟「標註完之後遮罩做得好不好」是兩件事,前者仍要求誠實申報。 | ①per-workflow: yellow+ error<br>②專案級: warning | yellow |
 | **B4** | **強制 positive fixture(讓 B2/B3 有東西可驗)**:碰 PII 的工具必須附一組**保證回傳非空、且含 `pii_fields` 資料**的測試 fixture(mock 或指向測試環境的穩定 `oid`/`id`)。**同 B3,觸發層級是 workflow**:只有標了 `outputs.*.pii: true` 的 workflow 才需要。 | `manifest` `workflow.test_fixture`(或 `workflows/<name>/tests/` 內對應檔) | 靜態 guard:workflow 標了 `outputs.*.pii: true` 卻缺 `test_fixture` 宣告 → 紅燈(沿用既有「workflow 缺 tests/」的檢查風格)。執行期由 B2 的斷言 (1) 保證 fixture 真的產出資料,fixture 失效(回空)= 紅燈,不是靜默跳過。 | yellow+: error | yellow |
 
 ### C. 資料流封鎖(讓 PII 沒有旁門)
@@ -87,11 +89,11 @@
 ### 🟢 Green — 低爆炸半徑
 現狀(PROJECT.yaml + secret scan + cloud-ready guard)**若該專案含 agent flow,再加**:
 - A1 輸入 reference-only(green: warning)、A3 憑證形狀參數(warning)
-- **B1 輸出上限(error)**、B2 no-PII-in-tool_result(green: warning)
+- **B1 輸出上限(error)**、B2 no-PII-in-tool_result(warning,全 tier 不擋)
 
 ### 🟡 Yellow — 碰 PII / 寫入 / 排程(`touches.pii: true` 自動落此級)
 綠區全部,且 A1 升為 **error**;再加:
-- **A2 輸入遮罩(error)、B2 no-PII-in-tool_result(error)、B3 宣告 pii_fields(error)**
+- **A2 輸入遮罩(warning,2026-08-28 降級,見 §4)、B2 no-PII-in-tool_result(warning,同上)、B3 宣告 pii_fields(error,metadata 申報維持強制)**
 - **C1 工具白名單、C3 egress allowlist、C4 檔案存取邊界**(碰外部檔案的 flow)
 - 若含寫入:**D1 draft-only+批准、D2 冪等鍵(error)**、D3 半徑上限
 - **E1 escalation**(若有 external)
@@ -104,8 +106,13 @@
 
 ## 4. 誠實邊界:框架強制 vs 政策
 
-- **框架強制(本 spec 全部)**:A–E 皆落成 guard error/warning 或 runtime 硬限 + conformance test。這是 framework 的價值——規則變成綠燈才能過。
+- **框架強制(A1/B1/B3①/B4/C/D/E)**:皆落成 guard error 或 runtime 硬限 + conformance test,擋 merge/擋執行。這是 framework 的價值——規則變成綠燈才能過。
 - **框架強制不了**:員工把 PII **貼進 Claude 對話**(不經任何 governed flow)。此通道 guard 看不到,只能靠 (a) 企業帳號條款(no-training / retention / ZDR)、(b) 使用政策、(c) 提供一條好到不必貼的 governed 路。**不得用工程手段假裝能封死此通道。** 本 spec 只負責 governed flow 這條。
+- **⚠️ PII 遮罩(A2/B2)降級為建議,不擋(2026-08-28 決定)**:原本 A2/B2 都是 error,現改為 warning。理由:
+  1. **威脅模型跟使用者現況不對稱**:本框架目前的使用者全是內部員工,操作都在公司內網。A2 管的 audit log/status/notification 未遮罩,本質是「內部人看內部資料」,不是外洩給不特定第三方,用「擋 merge」這種等級的機制去防一個內部可見性問題,成本高過實際風險。
+  2. **B2 管的 `tool_result` 雖然真的會離境到外部 LLM 供應商**(§0 的原始威脅模型),但只要 workflow 遵守 A1 的 reference-only 慣例,實際外洩量已從源頭壓低;而且技術上擋不住 AI agent 產生的輸出內容,跟上面「員工貼進對話」這條擋不住的邏輯是同一件事——沒有把 B2 硬性阻擋當作真防線的空間,硬擋只會製造摩擦,不會真的補上這道防線。
+  3. **仍然有效的部分沒變**:B3①(宣告 `pii_fields`,metadata 申報)、B4(positive fixture)維持 error——這兩個是「有沒有誠實標註碰了 PII」,零成本、不製造摩擦,跟「標註完之後遮罩做得好不好」(A2/B2,被降級的部分)是不同層次的要求。C(資料流封鎖)、D(寫入護欄)、E(可觀測)完全不受影響,這些管的是別的風險面(擅自繞過 adapter、未經批准寫入生產系統、壞了沒人修),跟 PII 遮罩無關。
+  4. **這不是「PII 不重要」,是「現階段這個機制不該是 blocking gate」**:A2/B2 的 guard 檢查邏輯保留(§5 M2 仍要建 detector、仍要跑 conformance test),只是命中時降成警示,持續累積可見度;等到有外部使用者、或合規稽核要求,再把這兩條升回 error——`guard`/conformance harness 的實作不用重寫,只是改嚴重度設定。
 
 ## 5. 實作落點與分期
 
@@ -122,7 +129,7 @@
 - **先建淨新增能力**:`ctx.redact(value, fields)` 與 `LogManager` 的自動遮罩(目前 `context.py` 的 `LogManager._emit` 逐字寫、零遮罩)——A2/B3/E3 全靠它,現在**不存在**,必須先實作。
 - ⚠️ **`NotificationManager`(`ctx.notify`)是遮罩死角,Python/TS 兩邊都要接上**:A2 規則明文「進 audit log / status / notification 前一律 mask」涵蓋三個面,但 `NotificationManager.__call__`(`platform_sdk/py`)把呼叫端組好的 `message` 字串直送 Slack webhook(`requests.post`),`Notify.slack()`(`platform_sdk/ts`)同樣把 `msg` 直接 `fetch` 給 webhook——兩邊都完全不經任何遮罩管線,不是靠「先建 `LogManager` 自動遮罩」就能連帶涵蓋的獨立路徑。`ctx.notify()` 送出前(py/ts 都要)也要跑 `ctx.redact()`,否則 A2/E1 escalation 通知本身就是一個現成的裸 PII 外洩口。C1/C2 聲稱「語言無關,`.ts` 專案同樣涵蓋」只適用於依賴清單掃描,遮罩這一項若只修 Python 就不算涵蓋。
 - ⚠️ **`render_status.py` 目前讀不到任何東西,不能宣稱「自動安全」**:`LogManager._emit` 依 cloud-ready spec §2.9 只印 stdout(`self.path` 只是保留欄位,`LogManager` 本身不寫檔),`render_status.py` 要讀的 `runs/<run_id>.jsonl` 現在沒有任何程式碼會產生——狀態頁不是「已經安全」,是「目前讀空氣」,屬 legacy(pre-cloud-ready)元件與現行 stdout-only log 路徑脫節,對映 `docs/roadmap.md` R5「status renderer 強制檢查」待補項。M2 的遮罩範圍**只保證 stdout 這條活路徑**(`_emit` 印出前 mask);`render_status.py` 要嘛跟著改成讀平台側 audit log store(K8s log collector 之後的儲存層),要嘛在 roadmap 標記為停用,兩者都不是「什麼都不用做,自動安全」。
-- 新增 `scripts/guard/conformance/`:對每個 governed flow 跑 fixture,執行 A2(輸入含 PII 時呼叫仍成功、且 audit/log **與 notify 訊息**已遮罩)、A3(憑證形狀參數被遮罩)、B1(輸出上限)。**B2 依 workflow 是否標 `outputs.*.pii: true` 分兩支**(§2 B2 已更新,harness 實作須同步跟這支邏輯,不能全部 workflow 套同一套):① 標了 `outputs.*.pii: true` 的 flow 跑 **B4→B2→B3 順序斷言**——先用 positive fixture 確認回傳非空且含 `pii_fields`(fixture 失效=紅燈,非跳過),再驗無裸 PII、再驗 model 面已遮罩;② 沒標 `outputs.*.pii: true` 的 flow(無 `pii_fields`/`test_fixture`)**不跑非空斷言**,直接拿該 flow 既有的一般測試輸出過 PII detector,命中即紅燈(意外裸 PII 洩漏的安全網),沒命中就過,不因缺 fixture 被誤判失敗。CI 綠燈才算過。
+- 新增 `scripts/guard/conformance/`:對每個 governed flow 跑 fixture,執行 A2(輸入含 PII 時呼叫仍成功、且 audit log **與 notify 訊息**是否已遮罩——**未遮罩記 warning,不讓 CI 失敗**,見 §4)、A3(憑證形狀參數被遮罩)、B1(輸出上限,一律 error)。**B2 依 workflow 是否標 `outputs.*.pii: true` 分兩支**(§2 B2 已更新,harness 實作須同步跟這支邏輯,不能全部 workflow 套同一套):① 標了 `outputs.*.pii: true` 的 flow 跑 **B4→B2→B3 順序斷言**——先用 positive fixture 確認回傳非空且含 `pii_fields`(**fixture 失效=紅燈,非跳過**——這是 B4 的 error,不受 B2 降級影響),再驗無裸 PII(**命中裸 PII = warning,不擋**,見 §4)、再驗 model 面已遮罩;② 沒標 `outputs.*.pii: true` 的 flow(無 `pii_fields`/`test_fixture`)**不跑非空斷言**,直接拿該 flow 既有的一般測試輸出過 PII detector,命中裸 PII → warning(意外洩漏的可見度安全網,不擋),沒命中就過,不因缺 fixture 被誤判失敗。CI 綠燈才算過(B2 的 warning 不影響綠燈,B1/B4 的 error 才影響)。
 - PII/secret detector:抽成共用模組,A2/A3/B2/B3 與 gitleaks 樣式庫共用。
 - **C4(a)(b) adapter 契約測試**:對 `ctx.sheet`/`ctx.storage` adapter 本身(不是逐 workflow)寫五個單元測試(§2 C4(a) 已展開為四個 containment/快取測試,harness 落點同步列出,不能只做前兩個):① `touches.google_scope` 清單內 ID 本身可存取;② 清單內某 folder 底下的子檔案可存取(驗證 parent-chain containment,不是只驗表層 ID 相等);③ 清單外的 ID(含清單外 folder 底下的子檔案)一律拋 `PermissionError`;④ 批次存取同一 folder 下多個檔案時,API 呼叫次數不隨檔案數線性增長(驗證 containment 快取生效,防 N+1 rate-limit 問題);⑤ adapter public 方法簽名不得出現 `name_contains`/`search`/`query` 之類的模糊比對參數(型別檢查即可,不用跑內容掃描)。C4(c)(來源資料 schema 驗證)不在此列,留 CLAUDE.md 當人工 review checklist,見 §2 C4 列的誠實標註。
 - ⚠️ **補一個合規的 positive-fixture 範例**:目前全 repo(即 clone 下來看得到的檔案)**唯一**合規範本是 `vibe-project-template/workflows/hello_world`(green、無 PII);`example/legacy_not_compliant/` 是 `.gitignore` 排除的本機私有素材(不隨 repo 發佈,新 clone 看不到),不能當「repo 內建範例」用,也不能假設實作者手上會有它。conformance harness 若沒有至少一個 yellow/red + 真實 `pii_fields`/`test_fixture` 的合規 workflow 可跑,B4→B2→B3 斷言鏈只能自測合成測資,無法佐證本節末「驗收標準」的宣稱。建議 M2 交付物內**在 repo 裡新建並 commit 一個** tracked 的合規範例(不要依賴本機才有的 legacy 素材當底稿,直接照 hello_world 的結構寫一個 yellow-tier 帶 PII 的範例)。
@@ -132,7 +139,7 @@
 - **D1 最小權限(load-bearing)**:**先把 `ctx.db` 從 `_NotYet` 佔位接上真 adapter**,再讓 agent 執行情境的 DB 連線限 read-only role / draft schema;生產寫入僅由已批准 executor 以另一組憑證執行。未宣告的直接寫入在權限層被擋。
 - 對映 [docs/roadmap.md](docs/roadmap.md) 的平台化項目。
 
-**驗收標準**:一個新 agent flow 專案,不看文件、只跑 `guard` + conformance harness,就能被正確判定 green/yellow/red 並擋下所有可**靜態/測試判定**的 A–E 違規(A1/B1/B2/B3/B4/C1/C4(a)(b)/D1-宣告/D2/E1/E2);而「宣告可繞過」的部分(D1 未宣告直寫、C2 繞 `ctx`、C3 未宣告 host)由 M3 runtime 權限/沙盒兜底;**C4(c)(來源資料 schema 驗證)與 E3(run ledger 完整性,補測試前)是目前唯二承認無法自動判定的例外**,不計入「不看文件也能被擋下」的保證。開發者要通過只能把設計改對,不能繞過。這就是「治理靠機器預設」的落地。
+**驗收標準**:一個新 agent flow 專案,不看文件、只跑 `guard` + conformance harness,就能被正確判定 green/yellow/red,並擋下所有可**靜態/測試判定且屬 error 等級**的 A–E 違規(A1/B1/B3①/B4/C1/C4(a)(b)/D1-宣告/D2/E1/E2);而「宣告可繞過」的部分(D1 未宣告直寫、C2 繞 `ctx`、C3 未宣告 host)由 M3 runtime 權限/沙盒兜底。**A2/B2(PII 遮罩)可判定但不擋**(2026-08-28 降為 warning,見 §4,現階段風險模型是內部員工+內網,遮罩仍會被偵測與標記,只是不阻擋 merge);**C4(c)(來源資料 schema 驗證)與 E3(run ledger 完整性,補測試前)是目前唯二承認無法自動判定的例外**,連 warning 都給不出來。開發者要通過只能把設計改對,不能繞過(error 部分);A2/B2 則是「被看見」而非「被擋下」。這就是「治理靠機器預設」的落地——強制的地方硬性強制,不強制的地方誠實標示,不假裝。
 
 <!-- agy-peer-reviewed: rounds=3 verdict=approved (initial) -->
 <!-- code-review + agy re-review: rounds=5 verdict=approved (6 spec-vs-repo mismatches fixed: tools[]→workflow model, redact/db flagged net-new, C3 egress field, ctx.browser.new_page, citations) -->

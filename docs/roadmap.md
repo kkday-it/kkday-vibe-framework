@@ -4,6 +4,18 @@
 
 最高優先級仍是 `vibe-cloud-ready-spec.md`。roadmap 項目若與 DevOps spec 衝突，必須改成 cloud-ready 版本後才能進主線。
 
+## ⚠️ 開始 M1 前先確認:conformance-gate-spec.md 的 A/B 規則跟現有用法對不上
+
+`conformance-gate-spec.md`(2026-08-28 merge,見 PR #1)的 A(輸入閘門)/B(輸出閘門)規則假設的情境是「AI agent **即時呼叫**一個 governed tool」(reference-only input、tool_result 筆數上限這些概念,對映的是 MCP 或類似的 agent-tool 呼叫層)。
+
+但這個 repo 目前實際的用法是「**同事叫 Claude Code 寫一次性的 `flow.py`**,之後由 K8s CronJob/worker 排程執行」——寫 code 的當下沒有任何 tool call 發生,A/B 規則邏輯上套不上這個流程。C(資料流封鎖)/D(寫入護欄)/E(不孤兒+可觀測)三組沒有這個問題,對「Claude 寫 code」這個現有流程直接有效。
+
+**M1 實作前建議先決定**:
+1. A/B 兩組規則現在要不要照字面實作進 `validate_project.py`?(若實作,guard 檢查的對象——input/output schema 的 maxLength/maxItems 這些——其實還是可以套在 `manifest.yaml` 的 `inputs`/`outputs` 定義上,不一定要等到有 MCP 呼叫層才有意義;但要確認這個解讀跟原意一致)
+2. 還是先只做 C/D/E,把 A/B 標成「等 MCP/即時 agent 呼叫層出現才啟用」,列進 roadmap 而非 M1?
+
+這個決定會影響 M1 的實際範圍,建議開工前先拍板,不要照單全收。
+
 ## R1. Scaffold 指令
 
 **狀態**：未實作。
