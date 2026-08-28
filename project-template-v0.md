@@ -76,6 +76,9 @@ touches:
   integrations: [slack, gmail]
   databases: [rds/qa-booking]
   pii: true
+  google_scope: []   # 用到 ctx.sheet/ctx.storage(Google)時填,adapter 只准碰這份清單內的 folder/sheet ID(conformance-gate-spec.md C4(a))
+
+escalation: "#qa-booking-oncall"   # external_sites 非空,E1 強制必填
 
 runtime:
   port: 8080
@@ -88,6 +91,11 @@ schedules:
     endpoint: /api/jobs/daily_report
     timezone: Asia/Taipei
     max_duration: 5m
+  healthcheck_thsr:               # external_sites 非空,E2 強制至少一個 healthcheck* task
+    cron: "*/15 * * * *"
+    endpoint: /api/jobs/healthcheck_thsr
+    timezone: Asia/Taipei
+    max_duration: 1m
 ```
 
 說明：
@@ -95,6 +103,7 @@ schedules:
 - 綠區專案最低要求：`PROJECT.yaml` + secret scan + cloud-ready guard。
 - `touches.pii: true` 強制 `risk_tier` 至少 yellow，且 audit/status/notification 必須套用 masking。
 - `schedules` 是 repo 內宣告；實際執行由平台/GitOps 轉成 Kubernetes CronJob 呼叫 endpoint，不在 container 內跑 crond，也不用 in-process timer。
+- `touches.external_sites` 非空時，`escalation` 必填、`schedules` 須至少一個 `healthcheck*` task（`conformance-gate-spec.md` E1/E2，agent flow 專案適用）；`risk_tier: red` 也強制 `escalation`。
 
 ## 5. Workflow Contract 摘要
 
@@ -176,6 +185,12 @@ DevOps cloud profile 下：
 - 程式內不可讀寫 AWS access key；S3 用 AWS SDK default credential chain。
 - 本機暫存只用 `/tmp`，用完刪除，且不能假設下一個 request 還存在。
 - Google Sheet/Drive 只能作為給人看的匯出視圖，不是 source of truth；source of truth 是 PostgreSQL/S3。
+
+**拿錯檔案三重防呆**（Sheet/Drive adapter 適用；guard/測試落點見 `conformance-gate-spec.md` C4）：
+
+1. **跨專案越權**：Google 存取憑證由平台/adapter 層代管，workflow 不得自己 import vendor SDK 直連。**adapter 介面接受任意 `file_id`/`path`（不然資料夾內動態新增的檔案讀不到），但執行期會查該 ID 的 parent chain，確認它是 `PROJECT.yaml touches.google_scope`（§4 schema）內某個 folder/sheet 的子孫，不在範圍內拋 `PermissionError`**——不是靜態白名單比對，是收斂進單一 adapter 實作的執行期邊界檢查，不是要求每個 workflow 自律；同一組憑證不因專案不同而能互相碰到彼此的資料夾。詳細設計（含防 API rate-limit 的快取要求）見 `conformance-gate-spec.md` C4(a)。
+2. **同名檔案誤讀**：**adapter 介面只提供 `get(file_id)` / `get(path)`，不提供 `search(name_contains=...)` 這類模糊比對方法**——同名檔、舊版本並存時「搜尋結果不可預期」這個問題從介面設計上直接排除，不用逐一 review workflow 程式碼。
+3. **來源資料本身錯誤**：adapter 邊界防不了人放錯檔案。workflow 讀入外部檔案後必須先驗 schema（欄位、筆數、日期範圍等合理性），不通過就丟 typed error 中止，不得帶著未驗證資料繼續執行；紅區 workflow 另需 dry-run/preview 讓人確認後再放行（見 §10 多方參數與紅區確認，或 §5 flow 規則的 dry-run/preview 要求）。**此條目前無自動化檢查**（同 conformance-gate-spec.md C4(c) 的誠實標註），只靠 CLAUDE.md 規範與 code review 把關。
 
 ## 9. 排程規約
 

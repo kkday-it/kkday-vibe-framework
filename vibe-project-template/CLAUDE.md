@@ -57,6 +57,8 @@
 
 Google Sheet/Drive 是匯出視圖，不是資料庫；壞了要能從 PostgreSQL/S3 重導。
 
+拿檔防呆：Sheet/Drive 一律用 file ID 或固定路徑，**禁止用檔名模糊搜尋**(同名檔/舊版本並存時結果不可預期);讀入的外部檔案要先驗 schema(欄位、筆數、日期合理性),不對就丟 typed error 中止,不要帶著未驗證資料往下跑。
+
 ## PII 與 Audit Log
 
 - script 內部處理 PII 時可以用裸資料，例如填表、比對名單、送 API。
