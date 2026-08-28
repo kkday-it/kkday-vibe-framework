@@ -188,7 +188,7 @@ DevOps cloud profile 下：
 
 **拿錯檔案三重防呆**（Sheet/Drive adapter 適用；guard/測試落點見 `conformance-gate-spec.md` C4）：
 
-1. **跨專案越權**：Google 存取憑證由平台/adapter 層代管，workflow 不得自己 import vendor SDK 直連。**adapter 介面本身只接受 `PROJECT.yaml touches.google_scope`（§4 schema）列出的目標資料夾/試算表 ID**，不對外暴露「指定任意 ID」的參數——這是收斂進單一 adapter 實作的介面設計約束，不是要求每個 workflow 自律；同一組憑證不因專案不同而能互相碰到彼此的資料夾。
+1. **跨專案越權**：Google 存取憑證由平台/adapter 層代管，workflow 不得自己 import vendor SDK 直連。**adapter 介面接受任意 `file_id`/`path`（不然資料夾內動態新增的檔案讀不到），但執行期會查該 ID 的 parent chain，確認它是 `PROJECT.yaml touches.google_scope`（§4 schema）內某個 folder/sheet 的子孫，不在範圍內拋 `PermissionError`**——不是靜態白名單比對，是收斂進單一 adapter 實作的執行期邊界檢查，不是要求每個 workflow 自律；同一組憑證不因專案不同而能互相碰到彼此的資料夾。詳細設計（含防 API rate-limit 的快取要求）見 `conformance-gate-spec.md` C4(a)。
 2. **同名檔案誤讀**：**adapter 介面只提供 `get(file_id)` / `get(path)`，不提供 `search(name_contains=...)` 這類模糊比對方法**——同名檔、舊版本並存時「搜尋結果不可預期」這個問題從介面設計上直接排除，不用逐一 review workflow 程式碼。
 3. **來源資料本身錯誤**：adapter 邊界防不了人放錯檔案。workflow 讀入外部檔案後必須先驗 schema（欄位、筆數、日期範圍等合理性），不通過就丟 typed error 中止，不得帶著未驗證資料繼續執行；紅區 workflow 另需 dry-run/preview 讓人確認後再放行（見 §10 多方參數與紅區確認，或 §5 flow 規則的 dry-run/preview 要求）。**此條目前無自動化檢查**（同 conformance-gate-spec.md C4(c) 的誠實標註），只靠 CLAUDE.md 規範與 code review 把關。
 
