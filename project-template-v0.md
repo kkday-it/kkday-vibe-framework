@@ -89,24 +89,16 @@ runtime:
   health_endpoint: /health
   job_endpoint_prefix: /api/jobs
 
-schedules:
-  daily_report:
-    cron: "0 2 * * 1-5"
-    endpoint: /api/jobs/daily_report
-    timezone: Asia/Taipei
-    max_duration: 5m
-  healthcheck_thsr:               # external_sites 非空,E2 強制至少一個 healthcheck* task
-    cron: "*/15 * * * *"
-    endpoint: /api/jobs/healthcheck_thsr
-    timezone: Asia/Taipei
-    max_duration: 1m
+schedules:                          # task→cron map;task 名即排程單位
+  daily_report: "0 2 * * 1-5"       # web 型:CronJob 打 POST /api/jobs/daily_report;job 型:跑映像 args=daily_report(./run.sh daily_report)
+  healthcheck_thsr: "*/15 * * * *"  # external_sites 非空,E2 強制至少一個 healthcheck* task
 ```
 
 說明：
 
 - 綠區專案最低要求：`PROJECT.yaml` + secret scan + cloud-ready guard。
 - `touches.pii: true` 強制 `risk_tier` 至少 yellow，且 audit/status/notification 必須套用 masking。
-- `schedules` 是 repo 內宣告；實際執行由平台/GitOps 轉成 Kubernetes CronJob 呼叫 endpoint，不在 container 內跑 crond，也不用 in-process timer。
+- `schedules` 是 repo 內的 `task→cron` map 宣告；實際執行由平台/GitOps 轉成 Kubernetes CronJob——web 型打 `POST /api/jobs/<task>`、job 型直接跑映像帶 `args`。不在 container 內跑 crond，也不用 in-process timer。endpoint 由慣例導出、timezone 與資源上限屬部署決定，都不寫在 `schedules` 裡（k8s manifest 由人維護在 GitOps repo，cloud-ready spec §5）。
 - `touches.external_sites` 非空時，`escalation` 必填、`schedules` 須至少一個 `healthcheck*` task（`conformance-gate-spec.md` E1/E2，agent flow 專案適用）；`risk_tier: red` 也強制 `escalation`。
 
 ## 5. Workflow Contract 摘要
@@ -205,7 +197,7 @@ DevOps cloud profile 下：
 
 兩型共通，每個排程任務必須：
 
-1. 在 `PROJECT.yaml schedules` 宣告 cron、timezone、max_duration（web 型另宣告 endpoint）。
+1. 在 `PROJECT.yaml schedules` 以 `task→cron` map 宣告。endpoint 由慣例導出（web 型 `POST /api/jobs/<task>`、job 型 `./run.sh <task>`）；timezone、資源上限、單次時限屬部署決定，由 GitOps repo 的 k8s manifest 管（cloud-ready spec §5），不寫在 `schedules`。
 2. 冪等、可重跑、有界執行。單次建議處理一批，回 JSON 摘要；最實用的冪等做法是留一份「今天這件事做過了沒」的台帳（DB 一張表）。
 3. log 處理數、失敗數、run_id；log 內 PII/secret 必須 mask。
 4. 失敗要有人知道：無人環境跑失敗只寫 log 等於沒發生 → 非零結束並發通知。
@@ -278,7 +270,7 @@ PII masking 原則：
 
 | 面向 | Owner 控 | 平台/框架控 |
 |---|---|---|
-| 排程 | `PROJECT.yaml schedules` 的頻率、endpoint、啟停 PR | Kubernetes CronJob/GitOps 轉換、執行、告警 |
+| 排程 | `PROJECT.yaml schedules` 的 task 名與頻率、啟停 PR | Kubernetes CronJob/GitOps 轉換（含 timezone/資源上限）、執行、告警 |
 | 憑證 | 宣告需要哪些 secret ref | secret 值、注入、輪替 |
 | DB | schema/migration PR | RDS、備份、連線注入、migration 執行權限 |
 | 檔案 | 產出分類與 retention 需求 | S3 bucket、IAM role、presigned URL adapter |

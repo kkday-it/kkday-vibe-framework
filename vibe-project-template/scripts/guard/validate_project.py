@@ -28,9 +28,9 @@ def check_project_yaml() -> dict:
         errors.append("status 必須是 active|archived")
     shape = data.get("shape")
     if shape is None:
-        warnings.append("PROJECT.yaml 未宣告 shape(web|job,見 cloud-ready spec §1.1);暫以 web 解讀")
+        errors.append("PROJECT.yaml 缺欄位: shape（web|job；欄位定義見 project-template-v0.md §3，形狀概念見 cloud-ready spec §1.1）")
     elif shape not in ("web", "job"):
-        errors.append("shape 必須是 web|job(cloud-ready spec §1.1)")
+        errors.append("shape 必須是 web|job（欄位定義見 project-template-v0.md §3，形狀概念見 cloud-ready spec §1.1）")
     if not re.fullmatch(r"[a-z0-9-]+\.[a-z0-9-]+", str(data.get("id", ""))):
         errors.append("id 格式必須是 <team>.<project>(小寫英數與連字號)")
 
@@ -111,9 +111,9 @@ def check_cloud_ready_spec(data: dict):
     if not (ROOT / "compose.yml").exists() and not (ROOT / "docker-compose.yml").exists():
         errors.append("Cloud-Ready: 根目錄缺少 compose.yml(第一關驗收要求,spec §1.8/§4.10)")
 
-    # repo 名全小寫 kebab-case:registry(ECR 等)拒收大寫,第一次 push 就會被擋(spec §4.10)
-    if ROOT.name != ROOT.name.lower():
-        errors.append(f"Cloud-Ready: repo 目錄名 '{ROOT.name}' 含大寫,registry 不接受;請用全小寫 kebab-case")
+    # repo 名全小寫 kebab-case（spec §4.10）:registry(ECR 等)拒收大寫,第一次 push 就會被擋
+    if not re.fullmatch(r"[a-z0-9-]+", ROOT.name):
+        errors.append(f"Cloud-Ready: repo 目錄名 '{ROOT.name}' 不是全小寫 kebab-case（僅准 a-z、0-9、連字號；registry 拒收大寫，spec §4.10）")
 
     # 2. 環境變數分類
     env_example = ROOT / ".env.example"
@@ -129,7 +129,7 @@ def check_cloud_ready_spec(data: dict):
         if shape == "job":
             # B 型:CronJob 直接跑映像帶 args → 分派器是 run.sh,不需 HTTP endpoint
             if not (ROOT / "run.sh").exists():
-                errors.append("Cloud-Ready: shape: job 宣告了 schedule,但缺 run.sh 工作分派器(CronJob args 的進入點)")
+                errors.append("Cloud-Ready: shape: job 宣告了 schedule，但缺 run.sh 工作分派器（CronJob args 的進入點）")
         else:
             api_py = ROOT / "src" / "api.py"
             if api_py.exists():
