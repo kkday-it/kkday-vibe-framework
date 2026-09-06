@@ -19,3 +19,7 @@ kkday-vibe-framework-review.md
 __pycache__/
 *.pyc
 node_modules/
+
+# Python 打包產物(pip install 本地路徑時 setuptools 會就地生成)
+build/
+*.egg-info/
