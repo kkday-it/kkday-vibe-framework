@@ -46,9 +46,9 @@ class SecretManager:
 
 
 class LogManager:
-    """結構化 JSON log(§2.9):每行 ts/run_id/workflow/step/level/msg/data。
+    """結構化 JSON log(§4.9):每行 ts/run_id/workflow/step/level/msg/data。
 
-    Cloud-Ready: log 只寫 stdout/stderr（Spec §2.9 硬約束 #10）。
+    Cloud-Ready: log 只寫 stdout/stderr（Spec §4.9 硬約束 #10）。
     K8s 的 log collector 會自動收集 stdout。
     """
 
@@ -72,7 +72,7 @@ class LogManager:
                "step": self._step, "level": level, "msg": str(msg)}
         if data:
             rec["data"] = data
-        # Spec §2.9: log 只寫 stdout，以 JSON 格式輸出
+        # Spec §4.9: log 只寫 stdout，以 JSON 格式輸出
         print(json.dumps(rec, ensure_ascii=False), flush=True)
         getattr(self._stdout, level.lower(), self._stdout.info)(f"[{self._step or '-'}] {msg}")
 
@@ -124,7 +124,7 @@ class NotificationManager:
 
 
 class StorageManager:
-    """ctx.storage — 產出檔案儲存 adapter(Spec §2.4 / §2.8),用 env 切換實作。
+    """ctx.storage — 產出檔案儲存 adapter(Spec §4.4 / §4.8),用 env 切換實作。
 
     STORAGE_PROVIDER=local(預設,開發用)| s3(雲上)。
     - local:寫 /tmp(暫存;重啟即失、多 pod 不共享)—— **僅供本機開發,不可當持久儲存**。
@@ -137,7 +137,7 @@ class StorageManager:
         if self.provider == "s3":
             self.bucket = os.environ.get("S3_BUCKET")
             if not self.bucket:
-                raise ValueError("[storage] STORAGE_PROVIDER=s3 需要 S3_BUCKET env(fail fast,Spec §2.2)")
+                raise ValueError("[storage] STORAGE_PROVIDER=s3 需要 S3_BUCKET env(fail fast,Spec §4.2)")
             self.region = os.environ.get("AWS_REGION")
             self.prefix = os.environ.get("S3_PREFIX", "").strip("/")
         else:
@@ -145,7 +145,7 @@ class StorageManager:
             self.base_path.mkdir(parents=True, exist_ok=True)
 
     def _s3(self):
-        # 預設憑證鏈(Spec §2.4);不讀 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+        # 預設憑證鏈(Spec §4.4);不讀 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
         import boto3
         return boto3.client("s3", region_name=self.region) if self.region else boto3.client("s3")
 
@@ -171,7 +171,7 @@ class StorageManager:
         return str(path)
 
     def presigned_url(self, filename: str, expires_in: int = 3600) -> str:
-        """給瀏覽器直接下載的 presigned URL(僅 s3,Spec §2.4)。"""
+        """給瀏覽器直接下載的 presigned URL(僅 s3,Spec §4.4)。"""
         if self.provider != "s3":
             raise NotYetImplemented("presigned_url() 僅在 STORAGE_PROVIDER=s3 可用")
         return self._s3().generate_presigned_url(

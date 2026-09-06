@@ -30,6 +30,7 @@ my-vibe-project/
 ├── CLAUDE.md
 ├── Dockerfile
 ├── .dockerignore
+├── compose.yml
 ├── .env.example
 ├── docs/
 │   └── cloud-ready-spec.md
@@ -56,8 +57,10 @@ my-vibe-project/
 必要規則：
 
 - `docs/cloud-ready-spec.md` 必須存在，`CLAUDE.md` 必須要求 AI 在動手前讀它。
-- 專案如果有 HTTP service，必須有無外部依賴的 `/health`。
-- 排程任務必須暴露 `POST /api/jobs/<name>` 或等價 endpoint，驗 `Authorization: Bearer $CRON_SECRET`。
+- 專案必須在 `PROJECT.yaml` 宣告形狀 `shape: web | job`（cloud-ready spec §1.1）：web = 常駐 service；job = 批次作業，跑完就結束。
+- 專案必須通過「第一關」：本機 `docker compose` 起得來、參數全在 `.env`（cloud-ready spec §1.8 驗收清單），repo 根目錄須有 `compose.yml`。
+- `shape: web` 必須有無外部依賴的 `/health`；排程任務暴露 `POST /api/jobs/<name>`，驗 `Authorization: Bearer $CRON_SECRET`。
+- `shape: job` 不需要 HTTP server 與 `/health`：CronJob 直接跑映像、`args` 傳工作名（對應 `./run.sh <task>`），失敗不自動重跑（`backoffLimit: 0`）、非零結束並發通知。
 - 有 DB 就使用 PostgreSQL migration；runtime 路徑不可做 DDL。
 - `src/` 放服務與業務邏輯；`workflows/` 放有副作用、需治理的動作單元；`adapters/` 封裝平台差異。
 
@@ -69,6 +72,7 @@ owner: lance.chien
 team: qa
 status: active
 risk_tier: yellow
+shape: web            # web | job(cloud-ready spec §1.1);job = 批次作業,CronJob 直接跑映像,不需 HTTP server
 
 touches:
   internal_apis: [product-service, order-service]
@@ -194,16 +198,18 @@ DevOps cloud profile 下：
 
 ## 9. 排程規約
 
-主線：**Kubernetes CronJob → HTTP endpoint**。
+主線依 `shape` 分兩型（cloud-ready spec §1.1/§4.7）：
 
-每個排程任務必須：
+- **`shape: web`**：Kubernetes CronJob → HTTP endpoint。服務內提供 `POST /api/jobs/<name>`，驗 `Authorization: Bearer $CRON_SECRET`（常數時間比對）。
+- **`shape: job`**：Kubernetes CronJob 直接跑映像，`args` 傳工作名（容器 ENTRYPOINT 即工作分派器，對應 `./run.sh <task>`）。不需 HTTP endpoint 與 `/health`。CronJob 用 `args:` 不用 `command:`（`command` 會蓋掉 tini，SIGTERM 沒人收）；幾支工作靠檔案交棒的要當成一個 CronJob，不拆。失敗不自動重跑（`backoffLimit: 0`），非零結束並發通知。
 
-1. 在 `PROJECT.yaml schedules` 宣告 cron、endpoint、timezone、max_duration。
-2. 在服務內提供 `POST /api/jobs/<name>`。
-3. 驗 `Authorization: Bearer $CRON_SECRET`，使用常數時間比對。
-4. 冪等、可重跑、有界執行。單次建議處理一批，回 JSON 摘要。
-5. log 處理數、失敗數、run_id；log 內 PII/secret 必須 mask。
-6. README 寫清楚排程頻率、可接受執行時段、外部 host、需要 env。
+兩型共通，每個排程任務必須：
+
+1. 在 `PROJECT.yaml schedules` 宣告 cron、timezone、max_duration（web 型另宣告 endpoint）。
+2. 冪等、可重跑、有界執行。單次建議處理一批，回 JSON 摘要；最實用的冪等做法是留一份「今天這件事做過了沒」的台帳（DB 一張表）。
+3. log 處理數、失敗數、run_id；log 內 PII/secret 必須 mask。
+4. 失敗要有人知道：無人環境跑失敗只寫 log 等於沒發生 → 非零結束並發通知。
+5. README 寫清楚排程頻率、可接受執行時段、外部 host、需要 env。
 
 禁止：
 
@@ -257,9 +263,10 @@ PII masking 原則：
 - workflow manifest 驗證。
 - 禁用直接 vendor SDK 檢查。
 - cloud-ready 檢查：
+  - `shape` 宣告存在且為 `web|job`；repo 名全小寫 kebab-case（registry 拒大寫）。
   - `.env.example` 變數有分類與用途。
-  - 有 service 時存在 `Dockerfile`、`.dockerignore`、`/health`。
-  - 排程宣告必須有 HTTP job endpoint。
+  - 存在 `Dockerfile`、`.dockerignore`、`compose.yml`；web 型另須 `/health`。
+  - 排程宣告：web 型必須有 HTTP job endpoint；job 型必須有 `run.sh` 工作分派器。
   - 掃描 `localhost`、`127.0.0.1`、SQLite、file DB、`setInterval`、`crond`、runtime DDL、寫專案目錄 uploads。
   - 檢查 Dockerfile 不 copy `.env`，且用非 root user。
 

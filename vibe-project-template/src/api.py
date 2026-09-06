@@ -6,7 +6,7 @@ from platform_sdk import run_workflow
 
 app = Flask(__name__)
 
-# [Spec §2.2] Fail fast: 缺必要 env 啟動就報錯
+# [Spec §4.2] Fail fast: 缺必要 env 啟動就報錯
 _REQUIRED_ENV = ["CRON_SECRET"]
 
 def _validate_env():

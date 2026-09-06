@@ -13,6 +13,12 @@ token*
 *.sqlite
 *.sqlite3
 
+# 引擎專屬 compose 設定(rootless podman 的 :U 等,spec §1.9)— 不進版控
+compose.override.yml
+
+# 批次作業(shape: job)的本機產出目錄,可能含個資(spec §1.4)
+out/
+
 # 常見雜物
 __pycache__/
 *.pyc

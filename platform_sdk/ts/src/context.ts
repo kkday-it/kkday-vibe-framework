@@ -58,7 +58,7 @@ export class Notify {
 }
 
 /**
- * ctx.storage — 產出檔案儲存 adapter(Spec §2.4 / §2.8),用 env 切換實作。
+ * ctx.storage — 產出檔案儲存 adapter(Spec §4.4 / §4.8),用 env 切換實作。
  *
  * STORAGE_PROVIDER=local(預設,開發用)| s3(雲上)。
  * - local:寫 /tmp(暫存;重啟即失、多 pod 不共享)—— 僅供本機開發,不可當持久儲存。
@@ -78,7 +78,7 @@ export class StorageManager {
     this.provider = (process.env.STORAGE_PROVIDER || 'local').toLowerCase();
     if (this.provider === 's3') {
       if (!process.env.S3_BUCKET) {
-        throw new Error('[storage] STORAGE_PROVIDER=s3 需要 S3_BUCKET env(fail fast, Spec §2.2)');
+        throw new Error('[storage] STORAGE_PROVIDER=s3 需要 S3_BUCKET env(fail fast, Spec §4.2)');
       }
       this.bucket = process.env.S3_BUCKET;
       this.region = process.env.AWS_REGION;
@@ -96,7 +96,7 @@ export class StorageManager {
   }
 
   private async s3Client(): Promise<any> {
-    // 預設憑證鏈(Spec §2.4);不讀 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+    // 預設憑證鏈(Spec §4.4);不讀 AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
     // 用變數 specifier 讓 tsc 不做靜態解析(選用相依,未安裝時才在 runtime 報錯)
     const spec = '@aws-sdk/client-s3';
     const mod: any = await import(spec).catch(() => {

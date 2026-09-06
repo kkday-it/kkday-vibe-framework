@@ -22,7 +22,7 @@ case "$TASK" in
     exec python -m platform_sdk.runner --project-yaml PROJECT.yaml "$@"
     ;;
   migrate)
-    # DB migration runner (Spec §2.5)
+    # DB migration runner (Spec §4.5)
     exec python scripts/migrate.py
     ;;
 

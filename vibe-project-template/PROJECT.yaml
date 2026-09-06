@@ -6,6 +6,8 @@ owner: your.name                # 掛名 owner(人,非團隊帳號)
 team: your-team
 status: active                  # active | archived
 risk_tier: green                # green | yellow | red
+shape: web                      # web | job(cloud-ready spec §1.1):web=常駐 service(監聽 PORT、要 /health);
+                                # job=批次作業(跑完就結束,CronJob 直接跑映像帶 args,不需 HTTP server 與 /health)
 
 # 這專案碰什麼(沒碰的留空陣列)
 touches:
@@ -20,3 +22,6 @@ schedules: {}                   # 空 = 無排程;task→cron map,task 名對應
 # schedules:
 #   worker: "* * * * *"         # 事件驅動 worker(多方參數流程用)
 #   daily_report: "0 0 * * *"   # 純排程任務
+# 排程執行方式依 shape 而異(cloud-ready spec §4.7):
+#   shape: web → K8s CronJob 打 POST /api/jobs/<task>(帶 Bearer $CRON_SECRET),須實作對應 endpoint
+#   shape: job → K8s CronJob 直接跑映像、args 傳 task 名(./run.sh <task>),不需 HTTP endpoint

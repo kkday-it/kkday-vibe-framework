@@ -6,7 +6,7 @@ setup(
     package_dir={"": "src"},
     packages=find_packages(where="src"),
     install_requires=[
-        # 釘住相容範圍以確保 build 可重現(Spec §2.1)
+        # 釘住相容範圍以確保 build 可重現(Spec §1.2)
         "python-dotenv>=1.0,<2",
         "playwright>=1.40,<2",   # 主引擎(§12-6);首次使用需 playwright install chromium
         "pyyaml>=6.0,<7",

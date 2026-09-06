@@ -14,8 +14,9 @@
 
 ## Cloud-Ready 鐵則
 
-- HTTP service 必須讀 `$PORT` 並綁 `0.0.0.0`。
-- 必須提供無外部依賴的 `/health` 或 `/api/health`，不可查 DB、不可登入、不可打外部服務。
+- 開工前先在 `PROJECT.yaml` 定專案形狀 `shape: web | job`（spec §1.1）。web = 常駐 service；job = 批次作業，跑完就結束，**不需要 HTTP server 與 `/health`**，不要為了排程硬包一個 HTTP server。
+- 第一關必過：本機 `docker compose` 起得來（web 型 `up`、job 型 `run --rm job <工作名>`）、參數全提進 `.env`（spec §1.8 驗收清單）。repo 根目錄必須有 `compose.yml`。
+- web 型必須讀 `$PORT` 並綁 `0.0.0.0`，並提供無外部依賴的 `/health` 或 `/api/health`，不可查 DB、不可登入、不可打外部服務。
 - 所有設定與 secret 只從 runtime env 來；新增 env 時同步更新 `.env.example`，並標註分類、用途、必填與否。
 - 容器內不寫專案目錄；暫存只寫 `/tmp`，檔案產出走 `ctx.storage` / S3。
 - DB 一律 PostgreSQL；SQLite / JSON file DB / file queue 只可用於 local prototype，不可進 cloud-ready path。
@@ -68,11 +69,13 @@ Google Sheet/Drive 是匯出視圖，不是資料庫；壞了要能從 PostgreSQ
 
 ## 排程與執行鐵則
 
-- 排程一律宣告在 `PROJECT.yaml schedules`，並實作對應 `POST /api/jobs/<name>` endpoint。
-- Cloud 執行由 Kubernetes CronJob 呼叫 HTTP endpoint，帶 `Authorization: Bearer $CRON_SECRET`。
-- 每個 job endpoint 必須冪等、可重跑、有界執行，回傳 JSON 摘要並寫 masked audit log。
-- 禁止私有 cron、container 內 crond、APScheduler 常駐、`setInterval` 當排程、GitHub Actions cron 作為唯一排程。
-- 排程一律由 Kubernetes CronJob 觸發 HTTP endpoint（`POST /api/jobs/<name>`），不使用 in-process timer、PaaS cron 宣告、或任何其他排程機制。
+- 排程一律宣告在 `PROJECT.yaml schedules`，執行方式依 `shape` 分型（spec §4.7）：
+  - `shape: web`：實作對應 `POST /api/jobs/<name>` endpoint，Kubernetes CronJob 呼叫它，帶 `Authorization: Bearer $CRON_SECRET`（常數時間比對）。
+  - `shape: job`：Kubernetes CronJob 直接跑映像、`args` 傳工作名（對應 `./run.sh <task>`），不需 HTTP endpoint。`./run.sh` 不帶參數要印出可跑的工作清單，不要報錯。
+- 每個排程任務必須冪等、可重跑、有界執行，回傳/印出 JSON 摘要（處理數、失敗數）並寫 masked audit log。最實用的冪等做法：留一份「今天這件事做過了沒」的台帳（DB 一張表）。
+- 失敗要有人知道：無人環境跑失敗只寫 log 等於沒發生 → 非零結束並發通知。會寄信/寫外部系統的工作**不可自動重試**（重試 = 重複通知真人）。
+- 禁止私有 cron、container 內 crond、APScheduler 常駐、`setInterval` 當排程、GitHub Actions cron 作為唯一排程、in-process timer、PaaS cron 宣告。
+- 對外發送開關（`SEND_MAIL`、`NOTIFY_LIVE` 之類「一送出去就收不回來」的）**不放 `.env`**，寫在 `compose.yml` 的 `environment:` 並預設關閉（spec §1.6）；要臨時打開用 CLI `-e` 覆寫。
 
 ## 觀測與錯誤鐵則
 

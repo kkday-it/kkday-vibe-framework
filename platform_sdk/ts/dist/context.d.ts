@@ -14,7 +14,7 @@ export declare class Notify {
     slack(msg: string): Promise<void>;
 }
 /**
- * ctx.storage — 產出檔案儲存 adapter(Spec §2.4 / §2.8),用 env 切換實作。
+ * ctx.storage — 產出檔案儲存 adapter(Spec §4.4 / §4.8),用 env 切換實作。
  *
  * STORAGE_PROVIDER=local(預設,開發用)| s3(雲上)。
  * - local:寫 /tmp(暫存;重啟即失、多 pod 不共享)—— 僅供本機開發,不可當持久儲存。

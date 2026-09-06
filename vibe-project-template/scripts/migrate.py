@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""db:migrate — 零依賴 forward-only SQL migration runner（Spec §2.5）。
+"""db:migrate — 零依賴 forward-only SQL migration runner（Spec §4.5）。
 
 用法:
     python -m scripts.migrate          # 套用所有未執行的 migration

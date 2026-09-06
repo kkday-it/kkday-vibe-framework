@@ -57,12 +57,13 @@ Vibe Framework 是一套讓企業員工與 AI coding agent 產出 **cloud-ready 
 
 從 `vibe-project-template/` 開新專案時，請把 [vibe-cloud-ready-spec.md](vibe-cloud-ready-spec.md) 視為驗收清單，而不是建議：
 
-- container 監聽 `$PORT` 並綁 `0.0.0.0`
-- 設定與 secret 只從 runtime env 來
-- 檔案產出進 S3，暫存只用 `/tmp`
-- DB 使用外部 PostgreSQL，schema 變更走 forward-only migration
-- 排程由 Kubernetes CronJob 呼叫 HTTP endpoint，例如 `POST /api/jobs/<name>`
-- health endpoint 不依賴 DB 或外部服務
+- 先過「第一關」：本機 `docker compose` 起得來、參數全在 `.env`（spec §1.8 驗收清單）
+- 開工前先定專案形狀 `shape: web | job`（spec §1.1）：web = 常駐 service，job = 批次作業跑完就結束
+- web 型：container 監聽 `$PORT` 並綁 `0.0.0.0`；health endpoint 不依賴 DB 或外部服務
+- job 型：CronJob 直接跑映像、`args` 傳工作名，不需 HTTP server 與 `/health`
+- 設定與 secret 只從 runtime env 來；檔案產出進 S3，暫存只用 `/tmp`
+- DB 使用外部 PostgreSQL（本機也用 Postgres，不用 SQLite），schema 變更走 forward-only migration
+- web 型排程由 Kubernetes CronJob 呼叫 `POST /api/jobs/<name>`；兩型皆須冪等、失敗要有人知道
 - audit log / status / notification 不可含 secret 或未遮罩 PII
 
 ## 給 AI Assistant 的指引

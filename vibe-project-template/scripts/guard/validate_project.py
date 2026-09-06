@@ -26,6 +26,11 @@ def check_project_yaml() -> dict:
         errors.append("risk_tier 必須是 green|yellow|red")
     if data.get("status") not in ("active", "archived"):
         errors.append("status 必須是 active|archived")
+    shape = data.get("shape")
+    if shape is None:
+        warnings.append("PROJECT.yaml 未宣告 shape(web|job,見 cloud-ready spec §1.1);暫以 web 解讀")
+    elif shape not in ("web", "job"):
+        errors.append("shape 必須是 web|job(cloud-ready spec §1.1)")
     if not re.fullmatch(r"[a-z0-9-]+\.[a-z0-9-]+", str(data.get("id", ""))):
         errors.append("id 格式必須是 <team>.<project>(小寫英數與連字號)")
 
@@ -103,24 +108,36 @@ def check_cloud_ready_spec(data: dict):
         errors.append("Cloud-Ready: 根目錄缺少 Dockerfile")
     if not (ROOT / ".dockerignore").exists():
         errors.append("Cloud-Ready: 根目錄缺少 .dockerignore")
-        
+    if not (ROOT / "compose.yml").exists() and not (ROOT / "docker-compose.yml").exists():
+        errors.append("Cloud-Ready: 根目錄缺少 compose.yml(第一關驗收要求,spec §1.8/§4.10)")
+
+    # repo 名全小寫 kebab-case:registry(ECR 等)拒收大寫,第一次 push 就會被擋(spec §4.10)
+    if ROOT.name != ROOT.name.lower():
+        errors.append(f"Cloud-Ready: repo 目錄名 '{ROOT.name}' 含大寫,registry 不接受;請用全小寫 kebab-case")
+
     # 2. 環境變數分類
     env_example = ROOT / ".env.example"
     if env_example.exists():
         content = env_example.read_text()
         if "[Runtime Secret]" not in content or "[Runtime Plain]" not in content:
             warnings.append("Cloud-Ready: .env.example 未包含 [Runtime Secret] 與 [Runtime Plain] 的分類標籤")
-            
-    # 3. 排程 API 檢查
+
+    # 3. 排程檢查(依 shape 分型,spec §1.1/§4.7)
     schedules = data.get("schedules")
+    shape = data.get("shape") or "web"
     if schedules:
-        api_py = ROOT / "src" / "api.py"
-        if api_py.exists():
-            api_content = api_py.read_text()
-            if "/api/jobs/" not in api_content and "cron" not in api_content:
-                errors.append("Cloud-Ready: 宣告了 schedule，但 src/api.py 中沒有 /api/jobs/ 相關的 Endpoint 實作")
+        if shape == "job":
+            # B 型:CronJob 直接跑映像帶 args → 分派器是 run.sh,不需 HTTP endpoint
+            if not (ROOT / "run.sh").exists():
+                errors.append("Cloud-Ready: shape: job 宣告了 schedule,但缺 run.sh 工作分派器(CronJob args 的進入點)")
         else:
-            errors.append("Cloud-Ready: 宣告了 schedule，但找不到 src/api.py 或對應的 Cron Endpoint")
+            api_py = ROOT / "src" / "api.py"
+            if api_py.exists():
+                api_content = api_py.read_text()
+                if "/api/jobs/" not in api_content and "cron" not in api_content:
+                    errors.append("Cloud-Ready: 宣告了 schedule，但 src/api.py 中沒有 /api/jobs/ 相關的 Endpoint 實作")
+            else:
+                errors.append("Cloud-Ready: 宣告了 schedule，但找不到 src/api.py 或對應的 Cron Endpoint")
 
     # 4. 反模式掃描
     anti_patterns = {

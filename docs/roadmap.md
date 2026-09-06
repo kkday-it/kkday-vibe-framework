@@ -22,9 +22,9 @@
 
 目標：
 
-- `vibe init <project-id>` 產生 cloud-ready project。
-- 複製 `docs/cloud-ready-spec.md`、`CLAUDE.md`、`PROJECT.yaml`、`.env.example`、`Dockerfile`、`.dockerignore`。
-- 依語言產生 health endpoint 與 `/api/jobs/<name>` skeleton。
+- `vibe init <project-id>` 產生 cloud-ready project，開場先問專案形狀（`shape: web | job`，cloud-ready spec §1.1）。
+- 複製 `docs/cloud-ready-spec.md`、`CLAUDE.md`、`PROJECT.yaml`、`.env.example`、`Dockerfile`、`.dockerignore`、`compose.yml`（依 shape 出 A 型或 B 型範本）。
+- web 型依語言產生 health endpoint 與 `/api/jobs/<name>` skeleton；job 型產生 `run.sh` 工作分派器 skeleton（不帶參數印工作清單）。
 
 完成條件：
 
@@ -37,11 +37,14 @@
 
 待補：
 
-- `.env.example` 變數分類檢查。
-- Dockerfile 非 root、`0.0.0.0`、不 copy `.env`、不在 CMD 跑 migration。
-- `.dockerignore` 檢查。
-- `/health` 與 `/api/jobs/*` 宣告檢查。
+- `.env.example` 變數分類檢查，以及 spec §1.7 的三條測試：程式讀了但 `.env.example` 沒列 → 紅（含 `need("X")`/`cfg("X")` 這類 helper 包裝的讀取）；`.env.example` 列了但沒程式讀 → 紅（環境自帶變數放具名 allowlist）；每個 key 都標分類。
+- 第一關驗收清單（spec §1.8）可自動化的項目：`cp .env.example .env`（值全空）後 `docker compose build` 成功、缺必要 env 時 fail fast 而非 fallback、對外發送開關預設關且寫在 `compose.yml`。
+- Dockerfile 非 root、`0.0.0.0`（web 型）、不 copy `.env`、不在 CMD 跑 migration。
+- `.dockerignore` 檢查（含憑證檔與含個資產出的排除）。
+- `/health` 與 `/api/jobs/*` 宣告檢查（僅 `shape: web`；job 型檢查 `run.sh` 分派器）。
 - 掃描反模式：SQLite、file DB、`setInterval`、crond、hardcoded localhost、runtime DDL、寫專案目錄 uploads。
+
+已完成（2026-09-06，對齊 0904 版 spec）：`shape: web|job` 宣告驗證、`compose.yml` 存在檢查、repo 名全小寫檢查、排程檢查依 shape 分型。
 
 ## R3. Kubernetes CronJob / GitOps 同步
 
@@ -50,8 +53,9 @@
 主線設計：
 
 - `PROJECT.yaml schedules` 是 repo 內宣告。
-- 平台/GitOps 將 schedules 轉成 Kubernetes CronJob。
-- CronJob 呼叫 `POST /api/jobs/<name>`，帶 `Authorization: Bearer $CRON_SECRET`。
+- 平台/GitOps 將 schedules 轉成 Kubernetes CronJob，依 `shape` 分兩型（cloud-ready spec §4.7）：
+  - `shape: web`：CronJob 呼叫 `POST /api/jobs/<name>`，帶 `Authorization: Bearer $CRON_SECRET`。
+  - `shape: job`：CronJob 直接跑映像，`args` 傳工作名（不用 `command`，避免蓋掉 tini）；`backoffLimit: 0`，失敗非零結束並發通知。
 
 不採用為主線：
 
@@ -70,7 +74,8 @@ Dkron 若未來仍需支援，定位為 legacy adapter 或特殊環境 fallback�
 
 - `ctx.storage` → S3，使用 AWS SDK default credential chain。
 - `ctx.db` → PostgreSQL，連線池小、TLS、CRUD runtime。**Agent flow 執行情境需 read-only role / draft schema 分離**（conformance-gate-spec.md D1 load-bearing 控制：未宣告 `effect: write` 的直寫要在權限層被擋，不能只靠宣告誠實），生產寫入只能由已批准 executor 用另一組較高權限憑證執行；`ctx.db` 從 `_NotYet` 佔位接上真 adapter 時一併做。
-- `ctx.notify` → 公司 Slack/Email connector，token 不外露；send 前跑 `ctx.redact()`(對映 conformance-gate-spec.md A2)。
+- `ctx.notify` → 公司 Slack/Email connector，token 不外露；send 前跑 `ctx.redact()`(對映 conformance-gate-spec.md A2)。**預設 dry-run**：讀 `NOTIFY_DRY_RUN` 一票否決開關（cloud-ready spec §1.6，開關放 `compose.yml`/CronJob env 不放 `.env`），未明確打開時所有對外送出點都不送。
+- **SDK config 層：空字串 env 一律當「沒設」**（cloud-ready spec §4.2）：config-manager 注入空值很常見，`??`/`or` 攔不住空字串，統一 trim 後為空即視為未設定並 fail fast。
 - `ctx.sheet` → Google Sheet export view，不作 source of truth；介面只接受 `PROJECT.yaml touches` 綁定的 folder/sheet ID 與 `file_id`/`path`，不暴露任意 ID 或模糊搜尋參數（對映 conformance-gate-spec.md C4）。
 - `ctx.mail` → 公司郵件 connector。
 - `ctx.log` → audit log masking、run summary、status renderer。
