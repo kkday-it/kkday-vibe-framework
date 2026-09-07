@@ -4,7 +4,7 @@
 set -euo pipefail
 
 TASK="${1:-}"
-[ -n "$TASK" ] || { echo "usage: ./run.sh <task> [args...]"; echo "tasks: web | worker | run --run-id=<id> | <自訂 task>"; exit 2; }
+[ -n "$TASK" ] || { echo "usage: ./run.sh <task> [args...]"; echo "tasks: web | worker | run <workflow-id> [--run-id r-x] [--input k=v ...] [--yes] | migrate | <自訂 task>"; exit 2; }
 shift || true
 
 case "$TASK" in
@@ -18,8 +18,12 @@ case "$TASK" in
     exec python -m platform_sdk.worker --project-yaml PROJECT.yaml
     ;;
   run)
-    # 由 worker 派工的單一 run:載入 skill、執行、更新狀態機、發狀態頁
-    exec python -m platform_sdk.runner --project-yaml PROJECT.yaml "$@"
+    # 執行單一 workflow run:載入 workflows/<id>/flow.py、執行、寫 run 摘要。
+    # runner 的 CLI 是 per-workflow(--workflow 必填),故 task 收 workflow id 轉傳(issue #2)。
+    WF="${1:-}"
+    [ -n "$WF" ] || { echo "usage: ./run.sh run <workflow-id> [--run-id r-x] [--input k=v ...] [--yes]" >&2; exit 2; }
+    shift
+    exec python -m platform_sdk.runner --workflow "$WF" "$@"
     ;;
   migrate)
     # DB migration runner (Spec §4.5)
