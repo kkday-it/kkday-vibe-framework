@@ -42,6 +42,7 @@
 - Dockerfile 非 root、`0.0.0.0`（web 型）、不 copy `.env`、不在 CMD 跑 migration。
 - `.dockerignore` 檢查（含憑證檔與含個資產出的排除）。
 - `/health` 與 `/api/jobs/*` 宣告檢查（僅 `shape: web`；job 型檢查 `run.sh` 分派器）。
+- **`shape` 欄位擴充支援混合形狀**：spec §1.1（2026-09-08 修訂）明許單 repo 同時含 A 型 service 與 B 型批次（首例：go_cathy 目標架構 frontend+backend+batch 三 image），目前 `shape: web|job` 單值表達不了；評估 `shape: hybrid` 或逐 workload 宣告，guard 檢查邏輯（endpoint vs run.sh）需隨之改成按 workload 分派。
 - 掃描反模式：SQLite、file DB、`setInterval`、crond、hardcoded localhost、runtime DDL、寫專案目錄 uploads。
 
 已完成（2026-09-06，對齊 0904 版 spec）：`shape: web|job` 宣告驗證、`compose.yml` 存在檢查、repo 名全小寫檢查、排程檢查依 shape 分型。

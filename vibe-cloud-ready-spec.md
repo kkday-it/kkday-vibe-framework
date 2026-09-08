@@ -1,6 +1,6 @@
 # 上雲環境約束（Cloud-Ready Spec）— 給 AI coding agent 的參考
 
-最後修訂：2026-09-04
+最後修訂：2026-09-08（依首個實案 review 回饋修訂：§1.1 混合形狀、§4.5 sslmode 依 driver / 邏輯不入 DB、§4.7 跨時區例外、§4.10 多 image 命名）
 
 > **這份文件的用途**：在你開始寫任何 code 之前先讀完。你寫出來的專案最終會被容器化，部署到公司內部的
 > **AWS EKS（Kubernetes）** 上。以下是那個環境的硬條件。**只要一開始就照著做，上雲時幾乎不需要改動；
@@ -56,6 +56,10 @@
 > 於是你得再做「非同步 + 狀態查詢」，而狀態要存哪裡又回到「要不要 DB」的問題。
 >
 > **B 型請在開工前跟平台確認走哪一種**，別自己假設。
+
+> 💡 **一個專案可以同時含兩種形狀**——常見於前後端分離 + 批次：前端（A）、後端 API（A）、
+> 批次作業（B）住同一個 repo、打成不同 image。**逐 workload 判型，不是逐 repo**；
+> §8 交給平台的資訊也要按 workload 分開列形狀。
 
 ### 1.2 Dockerfile：第一關就要對的幾件
 
@@ -446,12 +450,18 @@ PostgreSQL**，檔案放 **S3**，排程用 **Kubernetes CronJob**，環境變�
   `DB_PASSWORD` / `DB_NAME`，另外允許 `DATABASE_URL` 存在時直接短路使用（方便本機）。
   密碼帶原始值，由程式自己 URL-encode。
 - **本機就用 Postgres**（compose 起一個，見 §1.3）。用 SQLite 開發等於把方言差異留到上雲那天才爆。
-- **TLS 必開**。RDS 憑證鏈用 `sslmode=no-verify` / 等價設定即可（`require` 在某些 driver 會被當成
-  verify-full 而失敗）。
+- **TLS 必開**，做到「加密、不驗 CA」即可，但 **`sslmode` 的值依 driver 而異，抄錯直接連不上**：
+  - libpq / psycopg（Python 等）：用 `sslmode=require`（這一系的 `require` 本來就不驗 CA；
+    **`no-verify` 不是有效值**，有效值僅 disable/allow/prefer/require/verify-ca/verify-full）。
+  - Node `pg`：用 `sslmode=no-verify`（這一系的 `require` 會驗憑證而失敗）。
+  - （2026-09-08 修訂：原文一律寫 `no-verify`，該值在 libpq/psycopg 上無效。）
 - **連線池要小**（單 pod 個位數）。`pod 數 × pool 上限` 必須遠低於 RDS 的 max_connections。
 - app 的 DB 帳號**只有 CRUD 權限**。任何 `CREATE` / `ALTER` / `DROP` 都不能在 runtime 執行。
 - 只用標準 PostgreSQL 功能。需要的 extension 要**列出來事先確認**（不能假設 `pgvector`、`postgis` 已裝）。
 - 授權邏輯寫在**應用層**。不要把「誰能看什麼」建在依賴某個 BaaS 身分函式的 DB 規則上。
+- **商業邏輯不放 DB function**（stored procedure / BaaS RPC / Edge Function）：這類邏輯通常不在
+  repo 版控，code review 看不到、搬遷時要額外從 DB「出土」。DB 只放資料與必要約束；
+  邏輯寫在應用層，跟著 repo 走。
 
 **Schema 變更（migration）**
 - 目錄：`db/migrations/NNNN_<描述>.sql`，四位數零補、**檔名即版本、字典序執行**。
@@ -513,6 +523,9 @@ PostgreSQL**，檔案放 **S3**，排程用 **Kubernetes CronJob**，環境變�
 - 回傳／印出 JSON 摘要（處理數、失敗數）。
 - 把「需要哪些排程、多久一次、可接受的時段」寫在 README。
   **假設夜間與假日可能縮容 → 排程一律排在上班時段內。**
+  - 例外：**依收件人時區發送**的通知類排程（使用者跨多時區）無法一刀切成單一上班時段——
+    這類需求要**開工前跟平台確認**夜間/假日縮容下的 CronJob 調度支援，不要自己假設夜間一定會跑。
+    另外「給主管看的單一播報」和「逐人通知」要分開判斷：前者通常可以移進上班時段，後者不行。
 - 時間：pod 預設 **UTC**。DB 存 UTC，任何跟「幾點」有關的商業邏輯都要**顯式帶時區**，
   不要依賴系統 local time —— 平台把 `TZ` 蓋掉你也不能算錯。
 
@@ -557,6 +570,8 @@ PostgreSQL**，檔案放 **S3**，排程用 **Kubernetes CronJob**，環境變�
   k8s manifest 目錄名、Deployment / Service 名。四處必須一致。
   - 🔴 **一定要全小寫**：container registry（ECR 等）的 repository 名**不接受大寫**，
     有大寫字母的 repo 名會在第一次 push 就被拒。
+  - 單 repo 產**多個 image** 時（例：前端 / 後端 / 批次分開打包，見 §1.1 混合形狀），
+    image 名用 `<repo>-<component>` 後綴（如 `my-app-frontend` / `my-app-batch`），同樣全小寫。
 - repo 根目錄要有：`Dockerfile`、`.dockerignore`、`compose.yml`、`.env.example`、
   `db/migrations/`（若有 DB）、README 的「本機怎麼跑」與「部署備註」兩段。
 
