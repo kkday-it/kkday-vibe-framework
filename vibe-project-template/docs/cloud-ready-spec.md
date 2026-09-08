@@ -1,6 +1,6 @@
 # 上雲環境約束（Cloud-Ready Spec）— 給 AI coding agent 的參考
 
-最後修訂：2026-09-08（依首個實案 review 回饋修訂：§1.1 混合形狀、§4.5 sslmode 依 driver / 邏輯不入 DB、§4.7 跨時區例外、§4.10 多 image 命名）
+最後修訂：2026-09-08（兩批修訂——實案 review：§1.1 混合形狀、§4.5 sslmode 依 driver / 邏輯不入 DB、§4.7 跨時區例外、§4.10 多 image 命名；DevOps 釐清：TLS 內網非硬性、排程時段改「盡量」、前後端不必要不拆 image）
 
 > **這份文件的用途**：在你開始寫任何 code 之前先讀完。你寫出來的專案最終會被容器化，部署到公司內部的
 > **AWS EKS（Kubernetes）** 上。以下是那個環境的硬條件。**只要一開始就照著做，上雲時幾乎不需要改動；
@@ -57,9 +57,13 @@
 >
 > **B 型請在開工前跟平台確認走哪一種**，別自己假設。
 
-> 💡 **一個專案可以同時含兩種形狀**——常見於前後端分離 + 批次：前端（A）、後端 API（A）、
-> 批次作業（B）住同一個 repo、打成不同 image。**逐 workload 判型，不是逐 repo**；
+> 💡 **一個專案可以同時含兩種形狀**——常見於「服務（A）＋批次（B）」：網頁/API 常駐服務
+> 與排程批次住同一個 repo、打成不同 image。**逐 workload 判型，不是逐 repo**；
 > §8 交給平台的資訊也要按 workload 分開列形狀。
+>
+> ⚠️ 但 **image 數量以少為佳，能合就合**（2026-09-08 DevOps 釐清）：前後端**沒必要不要拆**成
+> 兩個 container——讓同一個 service 容器直接服靜態檔＋API 即可。合理的拆分線是「常駐（A）vs
+> 跑完就走（B）」這種**跑法不同**的邊界，不是程式語言或前後端的邊界。
 
 ### 1.2 Dockerfile：第一關就要對的幾件
 
@@ -360,7 +364,7 @@ PostgreSQL**，檔案放 **S3**，排程用 **Kubernetes CronJob**，環境變�
 | 3 | 完全無狀態：pod 隨時被殺、可能多份 | 2 | 登入掉、資料不一致、上傳檔消失 |
 | 4 | 不寫本機磁碟（除 `/tmp`）；檔案一律進物件儲存 | 1（不寫磁碟）／3（S3） | 重啟即失、多 pod 看不到彼此的檔 |
 | 5 | 不用 SQLite / 檔案型 DB / 檔案型佇列 | 1 | 無法水平擴充、資料遺失 |
-| 6 | DB = 外部 PostgreSQL，連線資訊來自 env，需 TLS | 3 | 連不上 |
+| 6 | DB = 外部 PostgreSQL，連線資訊來自 env；TLS 依平台指示（內網非硬性） | 3 | 連不上 |
 | 7 | schema 變更 = repo 內 forward-only SQL migration；**runtime 不做 DDL** | 2 | 上不了、權限被拒 |
 | 8 | 排程 = HTTP endpoint（A 型）或 CronJob 直接跑映像（B 型）；**都不是** in-process timer | 2 | 排程不會跑／重複跑 |
 | 9 | 雲端資源（S3 等）用 SDK **預設憑證鏈**，程式內零 key | 3 | 需要發 access key，安全審不過 |
@@ -450,11 +454,12 @@ PostgreSQL**，檔案放 **S3**，排程用 **Kubernetes CronJob**，環境變�
   `DB_PASSWORD` / `DB_NAME`，另外允許 `DATABASE_URL` 存在時直接短路使用（方便本機）。
   密碼帶原始值，由程式自己 URL-encode。
 - **本機就用 Postgres**（compose 起一個，見 §1.3）。用 SQLite 開發等於把方言差異留到上雲那天才爆。
-- **TLS 必開**，做到「加密、不驗 CA」即可，但 **`sslmode` 的值依 driver 而異，抄錯直接連不上**：
+- **TLS：內網環境非硬性要求**（2026-09-08 DevOps 釐清；連線都在公司內網/VPC 內）。要不要開以平台指示為準。
+  **若有開 TLS**，做到「加密、不驗 CA」即可，但 **`sslmode` 的值依 driver 而異，抄錯直接連不上**：
   - libpq / psycopg（Python 等）：用 `sslmode=require`（這一系的 `require` 本來就不驗 CA；
     **`no-verify` 不是有效值**，有效值僅 disable/allow/prefer/require/verify-ca/verify-full）。
   - Node `pg`：用 `sslmode=no-verify`（這一系的 `require` 會驗憑證而失敗）。
-  - （2026-09-08 修訂：原文一律寫 `no-verify`，該值在 libpq/psycopg 上無效。）
+  - （2026-09-08 修訂：原文寫「TLS 必開」且一律 `no-verify`——前者內網非硬性，後者在 libpq/psycopg 上無效。）
 - **連線池要小**（單 pod 個位數）。`pod 數 × pool 上限` 必須遠低於 RDS 的 max_connections。
 - app 的 DB 帳號**只有 CRUD 權限**。任何 `CREATE` / `ALTER` / `DROP` 都不能在 runtime 執行。
 - 只用標準 PostgreSQL 功能。需要的 extension 要**列出來事先確認**（不能假設 `pgvector`、`postgis` 已裝）。
@@ -522,7 +527,7 @@ PostgreSQL**，檔案放 **S3**，排程用 **Kubernetes CronJob**，環境變�
 - **失敗要有人知道。** 無人環境跑失敗如果只寫進 log，等於沒發生 → 非零結束並發通知。
 - 回傳／印出 JSON 摘要（處理數、失敗數）。
 - 把「需要哪些排程、多久一次、可接受的時段」寫在 README。
-  **假設夜間與假日可能縮容 → 排程一律排在上班時段內。**
+  **假設夜間與假日可能縮容 → 排程一律（盡量）排在上班時段內。**
   - 例外：**依收件人時區發送**的通知類排程（使用者跨多時區）無法一刀切成單一上班時段——
     這類需求要**開工前跟平台確認**夜間/假日縮容下的 CronJob 調度支援，不要自己假設夜間一定會跑。
     另外「給主管看的單一播報」和「逐人通知」要分開判斷：前者通常可以移進上班時段，後者不行。
@@ -570,8 +575,8 @@ PostgreSQL**，檔案放 **S3**，排程用 **Kubernetes CronJob**，環境變�
   k8s manifest 目錄名、Deployment / Service 名。四處必須一致。
   - 🔴 **一定要全小寫**：container registry（ECR 等）的 repository 名**不接受大寫**，
     有大寫字母的 repo 名會在第一次 push 就被拒。
-  - 單 repo 產**多個 image** 時（例：前端 / 後端 / 批次分開打包，見 §1.1 混合形狀），
-    image 名用 `<repo>-<component>` 後綴（如 `my-app-frontend` / `my-app-batch`），同樣全小寫。
+  - 單 repo 產**多個 image** 時（例：常駐服務與批次分開打包，見 §1.1 混合形狀；image 數量能合就合），
+    image 名用 `<repo>-<component>` 後綴（如 `my-app` / `my-app-batch`），同樣全小寫。
 - repo 根目錄要有：`Dockerfile`、`.dockerignore`、`compose.yml`、`.env.example`、
   `db/migrations/`（若有 DB）、README 的「本機怎麼跑」與「部署備註」兩段。
 
