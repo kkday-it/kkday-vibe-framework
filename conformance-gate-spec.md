@@ -1,6 +1,6 @@
 # Conformance Gate Spec — Agent Tool-I/O 治理與 Onboarding 驗收
 
-> 定位:本 spec **擴充**既有守門機制(`vibe-project-template/scripts/guard/validate_project.py`、`PROJECT.yaml`、workflow `manifest.yaml`、gitleaks),不取代。與 [vibe-cloud-ready-spec.md](vibe-cloud-ready-spec.md) 衝突時以 cloud-ready spec 為準;與 [project-template-v0.md](project-template-v0.md)「風險分級與 guard」節治理形狀對齊。
+> 定位:本 spec **擴充**既有守門機制(`vibe-project-template/scripts/guard/validate_project.py`、`PROJECT.yaml`、workflow `manifest.yaml`、gitleaks),不取代。與 [vibe-cloud-ready-spec-0908.md](vibe-cloud-ready-spec-0908.md) 衝突時以 cloud-ready spec 為準;與 [project-template-v0.md](project-template-v0.md)「風險分級與 guard」節治理形狀對齊。
 >
 > 最高原則不變:**治理靠機器預設,不靠每位員工記得。** 本 spec 的每一條都必須落成 `guard` 可自動判定的檢查(error / warning),否則不列入 gate。
 >

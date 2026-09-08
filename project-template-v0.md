@@ -1,6 +1,6 @@
 # Enterprise Workflows 框架 v0.2 — Cloud-Ready Repo Template
 
-> **v0.2 決策**：本提案以 `vibe-cloud-ready-spec.md` 為最高指導原則。任何 repo template、workflow contract、SDK shim、排程、DB、檔案儲存、log 或部署流程，若與 DevOps spec 衝突，一律以 DevOps spec 為準。
+> **v0.2 決策**：本提案以 `vibe-cloud-ready-spec-0908.md` 為最高指導原則。任何 repo template、workflow contract、SDK shim、排程、DB、檔案儲存、log 或部署流程，若與 DevOps spec 衝突，一律以 DevOps spec 為準。
 >
 > 目標環境：Docker image → 內部 registry → GitOps/ArgoCD → AWS EKS；DB 是 RDS PostgreSQL；檔案是 S3；排程是 Kubernetes CronJob 呼叫 HTTP endpoint；secret/config 由平台 runtime env 注入。
 >

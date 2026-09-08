@@ -2,7 +2,7 @@
 
 本檔保存「重要但尚未實作」的能力。主 README、template 與 proposal 不把這些寫成已交付承諾；但它們仍是後續要追的設計事項。
 
-最高優先級仍是 `vibe-cloud-ready-spec.md`。roadmap 項目若與 DevOps spec 衝突，必須改成 cloud-ready 版本後才能進主線。
+最高優先級仍是 `vibe-cloud-ready-spec-0908.md`。roadmap 項目若與 DevOps spec 衝突，必須改成 cloud-ready 版本後才能進主線。
 
 ## ⚠️ 開始 M1 前先確認:conformance-gate-spec.md 的 A/B 規則跟現有用法對不上
 
@@ -174,7 +174,7 @@ Cloud-ready 版方向：
 
 **目標**：把一次性手工遷移產物一般化成可複用套件，讓第 2..N 個案子變「照模板填空、對同一份 spec/guard/ctx.*」。
 
-- **遷移文件模板集**（結構固定、內容留白）：gap-report（現況 vs `vibe-cloud-ready-spec.md` 逐條落差）、target-architecture-design（目標 + 已定決策）、migration-plan（分階段 + 每階段完成條件/驗證/回滾）、HANDOFF（交接入口）、UAT-checklist（PM 驗收）。
+- **遷移文件模板集**（結構固定、內容留白）：gap-report（現況 vs `vibe-cloud-ready-spec-0908.md` 逐條落差）、target-architecture-design（目標 + 已定決策）、migration-plan（分階段 + 每階段完成條件/驗證/回滾）、HANDOFF（交接入口）、UAT-checklist（PM 驗收）。
 - **遷移 playbook**：四步驟 discovery→設計→plan→QA，對應本 framework 的 spec/guard/`ctx.*`；採 strangler + 兩道閘門模式：**G0 待盤點**（既有 BaaS 黑盒：schema/RPC/RLS/Realtime/Edge Function 匯出）、**G1 資料遷移與寫入切換**（初始匯入對帳、單一寫入源紀律、增量追平、回切演練）。
 - **對準目標**：批次半搬成 `workflows/<name>/flow.py` + `ctx.*` + manifest（framework 甜蜜區，依賴 R4 的 `ctx.db`）；web + 資料層半在 framework 具備 web 托管與 `ctx.db` 前，playbook 需標明「framework 尚未涵蓋、暫走自管」。
 

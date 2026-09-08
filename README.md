@@ -2,7 +2,7 @@
 
 Vibe Framework 是一套讓企業員工與 AI coding agent 產出 **cloud-ready enterprise workflow** 的 repo template、SDK shim 與治理規約。
 
-本 repo 的最高指導原則是 [vibe-cloud-ready-spec.md](vibe-cloud-ready-spec.md)：目標環境是公司內部 AWS EKS、RDS PostgreSQL、S3、Kubernetes CronJob、stdout/stderr logging，以及由平台 config-manager 注入的 runtime env/secrets。任何提案、template 或 SDK 行為若與這份 DevOps spec 衝突，以 DevOps spec 為準。
+本 repo 的最高指導原則是 [vibe-cloud-ready-spec-0908.md](vibe-cloud-ready-spec-0908.md)：目標環境是公司內部 AWS EKS、RDS PostgreSQL、S3、Kubernetes CronJob、stdout/stderr logging，以及由平台 config-manager 注入的 runtime env/secrets。任何提案、template 或 SDK 行為若與這份 DevOps spec 衝突，以 DevOps spec 為準。
 
 ## 核心目標
 
@@ -15,7 +15,7 @@ Vibe Framework 是一套讓企業員工與 AI coding agent 產出 **cloud-ready 
 
 ```text
 .
-├── vibe-cloud-ready-spec.md       # DevOps 上雲硬約束，最高優先級
+├── vibe-cloud-ready-spec-0908.md       # DevOps 上雲硬約束，最高優先級
 ├── project-template-v0.md         # Enterprise Workflows repo 層提案
 ├── platform_sdk/
 │   ├── py/                        # Python ctx.* local shim
@@ -55,7 +55,7 @@ Vibe Framework 是一套讓企業員工與 AI coding agent 產出 **cloud-ready 
 
 ## 新專案原則
 
-從 `vibe-project-template/` 開新專案時，請把 [vibe-cloud-ready-spec.md](vibe-cloud-ready-spec.md) 視為驗收清單，而不是建議：
+從 `vibe-project-template/` 開新專案時，請把 [vibe-cloud-ready-spec-0908.md](vibe-cloud-ready-spec-0908.md) 視為驗收清單，而不是建議：
 
 - 先過「第一關」：本機 `docker compose` 起得來、參數全在 `.env`（spec §1.8 驗收清單）
 - 開工前先定專案形狀 `shape: web | job`（spec §1.1）：web = 常駐 service，job = 批次作業跑完就結束
@@ -70,7 +70,7 @@ Vibe Framework 是一套讓企業員工與 AI coding agent 產出 **cloud-ready 
 
 修改任何 template、SDK 或 workflow 規約前，先讀：
 
-1. [vibe-cloud-ready-spec.md](vibe-cloud-ready-spec.md)
+1. [vibe-cloud-ready-spec-0908.md](vibe-cloud-ready-spec-0908.md)
 2. [project-template-v0.md](project-template-v0.md)
 3. [vibe-project-template/CLAUDE.md](vibe-project-template/CLAUDE.md)
 
