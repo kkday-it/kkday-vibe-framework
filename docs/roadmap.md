@@ -164,3 +164,22 @@ Cloud-ready 版方向：
 - 不應寫進預設 template。
 - 不應取代 S3/status endpoint/Kubernetes CronJob 主線。
 - 若使用，必須明確標成 legacy adapter，並通過 PII/secret masking。
+
+## R11. 既有專案遷移套件（Migration Kit for Existing Projects）
+
+**狀態**：未實作。已有首個手工實例可作一般化來源（go_cathy 上雲遷移文件集，內部案例、不隨 repo 發布，僅作遷移參考）。
+
+**背景**：目前 framework 是 greenfield-first —— `vibe-project-template` + guard 讓**新**專案天生 cloud-ready。但公司內有大量**既有** Netlify/Supabase/PaaS 專案要上 EKS，framework **沒有系統化的「把舊 app 搬進來」流程**，只給了目標（`ctx.*`）與閘門（guard）。若每案重造流程，等於治理不了規模。
+
+**目標**：把一次性手工遷移產物一般化成可複用套件，讓第 2..N 個案子變「照模板填空、對同一份 spec/guard/ctx.*」。
+
+- **遷移文件模板集**（結構固定、內容留白）：gap-report（現況 vs `vibe-cloud-ready-spec.md` 逐條落差）、target-architecture-design（目標 + 已定決策）、migration-plan（分階段 + 每階段完成條件/驗證/回滾）、HANDOFF（交接入口）、UAT-checklist（PM 驗收）。
+- **遷移 playbook**：四步驟 discovery→設計→plan→QA，對應本 framework 的 spec/guard/`ctx.*`；採 strangler + 兩道閘門模式：**G0 待盤點**（既有 BaaS 黑盒：schema/RPC/RLS/Realtime/Edge Function 匯出）、**G1 資料遷移與寫入切換**（初始匯入對帳、單一寫入源紀律、增量追平、回切演練）。
+- **對準目標**：批次半搬成 `workflows/<name>/flow.py` + `ctx.*` + manifest（framework 甜蜜區，依賴 R4 的 `ctx.db`）；web + 資料層半在 framework 具備 web 托管與 `ctx.db` 前，playbook 需標明「framework 尚未涵蓋、暫走自管」。
+
+**完成條件**：
+
+- 一個既有專案能照套件產出完整遷移文件、不重造流程。
+- 遷移「完成」由 **guard 綠 + 測試綠** 機械判定，取代人工逐案 review（依賴 R2 guard 完整化）。
+
+**依賴**：R2（Cloud-Ready Guard 完整化）、R4（`ctx.db` 實作）。
