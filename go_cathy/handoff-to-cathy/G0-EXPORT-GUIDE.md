@@ -19,7 +19,23 @@
 
 ---
 
-## 要匯出的 9 樣（存進一個 `supabase-export/` 資料夾）
+## 主路徑（優先）：跑 `supabase-inventory` skill 自動盤點
+
+**能跑 skill 就別手動。** 交接包內附 `supabase-inventory.skill`——一個只讀、fail-closed 的自動盤點工具，一鍵產出帶「來源」的 `manifest.json`，涵蓋下面手動 9 樣的**全部**，還多做 code-scan 交叉檢查（哪些表/RPC 有引用沒定義、RLS 沒開、service_role 外洩…）。**由 RD / 你的 Claude Desktop 跑**（需要 `supabase` CLI + `jq`/`rg` 等，非 Cathy 手動點）。
+
+- **Cathy 只要提供三樣存取**：① 專案 ref（Dashboard URL 那段 20 碼）、② Personal access token（Dashboard → Account → Access Tokens，`sbp_` 開頭）、③ DB 連線字串（**Session pooler，Port 5432**）。
+- RD/AI 跑：
+  ```bash
+  export SUPABASE_PROJECT_REF=... SUPABASE_ACCESS_TOKEN=... SUPABASE_DB_URL='postgresql://...'
+  CODE_DIR=<repo> bash <解開的 skill>/scripts/collect_supabase.sh 2>&1 | tee supabase-inventory/collect.log
+  ```
+- 🔎 **全程留痕（回應「怕 skill 還不完善」）**：每個查詢寫 `raw/db/<name>.json` **＋同名 `.err`**；每支 API 的 HTTP status 進 `raw/api/_status.tsv`；`manifest.json` 每欄都帶 `source` 指回原始輸出。
+  > ⚠️ **信 manifest 前，先看 `raw/**/*.err` 與 `raw/api/_status.tsv`**：查詢失敗會在 manifest 變成空陣列 `[]`（看起來像「沒這功能」），只有 `.err` 會告訴你「是查失敗、不是沒有」。階段訊息走 stderr → 上面的 `| tee collect.log` 才會留下 console log。
+- **skill 跑不動**（缺 token / 缺 CLI / 權限 403）→ 才走下面的手動 9 樣備援。兩條路產物等價，交件擇一即可。
+
+---
+
+## 備援：手動匯出 9 樣（skill 跑不動時，存進 `supabase-export/`）
 
 > 💡 **下面的 SQL 查詢（第 2、3、4、8、9 項）都可以不開終端機**：直接在 Supabase Dashboard 左側點 **SQL Editor → New query**，貼上執行，再點右上角把結果下載成 CSV 即可。只有 `pg_dump`（第 1、8 項）需要終端機。
 
@@ -124,7 +140,7 @@ order by table_name;
 ## 交件邊界（重要）
 - **交給誰**：RD（Lance 會指定接收人與存放位置）。
 - **交什麼**：`supabase-export/` 整包。**含個資的 `08_data.sql` 走安全通道、不進 repo**；schema/function/policy 這類技術定義可入 repo。
-- **記一筆**：匯出日期、Supabase 專案識別、每項「成功/失敗/不存在」。
+- **留一份 log（供事後 retro）**：把過程存成 `supabase-export/export-log.md`（skill 路徑則是 `collect.log` + `raw/**/*.err` + `_status.tsv`）——匯出日期、Supabase 專案識別、每項「成功/失敗/不存在」、失敗的原始錯誤。**不要只留結論**。
 - **G0 完成 = 交 RD 接手做 ② 重構**。這個 session（Cathy 的 G0）匯出完就交件，**不要**自己往下做重構/資料庫遷移——那是 RD 的下一步。
 
 ## 交付清單（給 RD）
