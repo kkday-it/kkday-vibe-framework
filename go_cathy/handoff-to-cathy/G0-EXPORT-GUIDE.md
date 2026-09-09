@@ -31,11 +31,13 @@
   ```
 - 🔎 **全程留痕（回應「怕 skill 還不完善」）**：每個查詢寫 `raw/db/<name>.json` **＋同名 `.err`**；每支 API 的 HTTP status 進 `raw/api/_status.tsv`；`manifest.json` 每欄都帶 `source` 指回原始輸出。
   > ⚠️ **信 manifest 前，先看 `raw/**/*.err` 與 `raw/api/_status.tsv`**：查詢失敗會在 manifest 變成空陣列 `[]`（看起來像「沒這功能」），只有 `.err` 會告訴你「是查失敗、不是沒有」。階段訊息走 stderr → 上面的 `| tee collect.log` 才會留下 console log。
-- **skill 跑不動**（缺 token / 缺 CLI / 權限 403）→ 才走下面的手動 9 樣備援。兩條路產物等價，交件擇一即可。
+- **沒有 coding agent**（例如 **Cathy 用聊天版 Claude 自己做**）或 skill 跑不動 → 走下面的**手動 Dashboard 路徑**。**兩條路產物等價**，交件擇一即可。
 
 ---
 
-## 備援：手動匯出 9 樣（skill 跑不動時，存進 `supabase-export/`）
+## 手動 Dashboard 路徑（沒有 coding agent 時，如 Cathy 自己做；存進 `supabase-export/`）
+
+> 這條路**不需要終端機、不需要 coding agent**：AI 給你 SQL，你貼到 Supabase Dashboard 的 **SQL Editor** 跑、下載 CSV；Edge Function / Auth / Storage 在畫面上複製/截圖。憑證只在你自己的 Dashboard / 你的 Claude，不外流。
 
 > 💡 **下面的 SQL 查詢（第 2、3、4、8、9 項）都可以不開終端機**：直接在 Supabase Dashboard 左側點 **SQL Editor → New query**，貼上執行，再點右上角把結果下載成 CSV 即可。只有 `pg_dump`（第 1、8 項）需要終端機。
 
