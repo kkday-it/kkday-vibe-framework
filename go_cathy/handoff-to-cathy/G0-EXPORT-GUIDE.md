@@ -21,23 +21,23 @@
 
 ## 主路徑（優先）：跑 `supabase-inventory` skill 自動盤點
 
-**能跑 skill 就別手動。** 交接包內附 `supabase-inventory.skill`——一個只讀、fail-closed 的自動盤點工具，一鍵產出帶「來源」的 `manifest.json`，涵蓋下面手動 9 樣的**全部**，還多做 code-scan 交叉檢查（哪些表/RPC 有引用沒定義、RLS 沒開、service_role 外洩…）。**由 RD / 你的 Claude Desktop 跑**（需要 `supabase` CLI + `jq`/`rg` 等，非 Cathy 手動點）。
+**能跑 skill 就別手動。** 交接包內附 `supabase-inventory.skill`——一個只讀、fail-closed 的自動盤點工具，一鍵產出帶「來源」的 `manifest.json`，涵蓋下面手動 9 樣的**全部**，還多做 code-scan 交叉檢查（哪些表/RPC 有引用沒定義、RLS 沒開、service_role 外洩…）。**Cathy 用她 desktop 的 Claude Code 就能跑**（desktop 版 Claude Code 能開終端、跑 skill、讀 `CLAUDE.md`；**憑證全程留在她自己機器、不外流**）；RD 端有 coding agent 也可跑。
 
-- **Cathy 只要提供三樣存取**：① 專案 ref（Dashboard URL 那段 20 碼）、② Personal access token（Dashboard → Account → Access Tokens，`sbp_` 開頭）、③ DB 連線字串（**Session pooler，Port 5432**）。
-- RD/AI 跑：
+- **三樣存取**（Cathy 只在自己機器上交給自己的 Claude Code，不外傳）：① 專案 ref（Dashboard URL 那段 20 碼）、② Personal access token（Dashboard → Account → Access Tokens，`sbp_` 開頭）、③ DB 連線字串（**Session pooler，Port 5432**）。
+- 跑（Cathy 的 Claude Code 或 RD coding agent 皆可）：
   ```bash
   export SUPABASE_PROJECT_REF=... SUPABASE_ACCESS_TOKEN=... SUPABASE_DB_URL='postgresql://...'
   CODE_DIR=<repo> bash <解開的 skill>/scripts/collect_supabase.sh 2>&1 | tee supabase-inventory/collect.log
   ```
 - 🔎 **全程留痕（回應「怕 skill 還不完善」）**：每個查詢寫 `raw/db/<name>.json` **＋同名 `.err`**；每支 API 的 HTTP status 進 `raw/api/_status.tsv`；`manifest.json` 每欄都帶 `source` 指回原始輸出。
   > ⚠️ **信 manifest 前，先看 `raw/**/*.err` 與 `raw/api/_status.tsv`**：查詢失敗會在 manifest 變成空陣列 `[]`（看起來像「沒這功能」），只有 `.err` 會告訴你「是查失敗、不是沒有」。階段訊息走 stderr → 上面的 `| tee collect.log` 才會留下 console log。
-- **沒有 coding agent**（例如 **Cathy 用聊天版 Claude 自己做**）或 skill 跑不動 → 走下面的**手動 Dashboard 路徑**。**兩條路產物等價**，交件擇一即可。
+- **skill 跑不動 / 不熟 Claude Code** → 走下面的**手動 Dashboard 路徑**（純 Dashboard 點按、不用終端）。**兩條路產物等價**，交件擇一即可。
 
 ---
 
-## 手動 Dashboard 路徑（沒有 coding agent 時，如 Cathy 自己做；存進 `supabase-export/`）
+## 手動 Dashboard 路徑（備援：skill 跑不動 / 不用 Claude Code 時；存進 `supabase-export/`）
 
-> 這條路**不需要終端機、不需要 coding agent**：AI 給你 SQL，你貼到 Supabase Dashboard 的 **SQL Editor** 跑、下載 CSV；Edge Function / Auth / Storage 在畫面上複製/截圖。憑證只在你自己的 Dashboard / 你的 Claude，不外流。
+> 這條路**不需要終端機**：AI 給你 SQL，你貼到 Supabase Dashboard 的 **SQL Editor** 跑、下載 CSV；Edge Function / Auth / Storage 在畫面上複製/截圖。憑證只在你自己的 Dashboard / 你的 Claude，不外流。
 
 > 💡 **下面的 SQL 查詢（第 2、3、4、8、9 項）都可以不開終端機**：直接在 Supabase Dashboard 左側點 **SQL Editor → New query**，貼上執行，再點右上角把結果下載成 CSV 即可。只有 `pg_dump`（第 1、8 項）需要終端機。
 
