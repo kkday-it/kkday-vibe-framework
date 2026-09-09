@@ -1,0 +1,53 @@
+# Specs CHANGELOG
+
+## 2026-09-07
+
+- `2026-09-07-cloud-ready-migration-gap-report.md`（新增）/ 建立上雲遷移 gap report（步驟 1 discovery）/ 對照 `vibe-cloud-ready-spec.md` 盤點 `kkday-go-scheduling` 現況、逐條 12 硬約束與第一關落差、列出 Supabase 後端待盤點清單。目標架構取向定為「選項 A 前後端分離」。
+- `2026-09-07-cloud-ready-migration-gap-report.md`（§1.2/§3/§5/§6 回填）/ 依 `gz_cathy/README-系統架構.md` 補入三項先前 code 掃不到的黑盒 / (a) Supabase Realtime 即時推播、(b) `trigger-task-engine` Edge Function、(c) `approve-staff-request` Edge Function（外部 webhook、撞 §4.6）；補全表名與 RPC；待盤點清單擴充為 9 項；分級彙總改編號。
+- `2026-09-07-cloud-ready-target-architecture-design.md`（新增）/ 步驟 2 目標架構設計 / 選項 A 前後端分離：單 repo 三 image（frontend/backend/batch）、Python/FastAPI 後端、Google OAuth+JWT、直連 RDS、RLS→應用層授權、Realtime→輪詢、8 支批次統一 dispatcher+CronJob、排程重排。含待盤點（9 項）與待業務確認（4 項）兩清單。owner 三拍板點（Realtime→輪詢、Slack 改連結、Python 共用層）全數確認。
+- `../plans/2026-09-07-cloud-ready-migration.md`（新增）/ 步驟 3 分階段 migration plan / strangler 策略，G0 待盤點閘門 + Phase 1–7。Phase 1（第一關容器化，不依賴 G0）完整展開為 8 個 bite-sized TDD 任務；Phase 2–7 給 roadmap 級完成條件/驗證/回滾，待 G0 各自展開細計畫。
+- `../plans/2026-09-07-cloud-ready-migration.md`（Task 4/Task 6 peer-review 修正）/ 自審發現兩處，codex CLI 審查途中撞 usage limit 未產出完整 findings（額度 9/8 恢復）/ (HIGH) Task 4 守門測試 ALLOWLIST 補 `NOTIFY_DRY_RUN`——否則 Task 3「程式讀但 .env.example 刻意不列」會讓 test_every_read_env_is_listed 誤紅、與 Task 3 自相矛盾；(LOW) Task 6 nginx 寫死 8080 未讀 PORT env，加註 envsubst 補法，記部署備註待平台確認。
+- `../qa/2026-09-07-uat-checklist-cathy.md`（新增）/ 步驟 4 QA 產物 / 給 Cathy(PM) 的 UAT 測試清單，10 區（A 登入…I 資料一致性 + J 簽核），標 P0/P1，含四個變更行為驗收（Realtime/Slack/播報/通知時段）與新舊資料一致性抽查。另產互動 HTML artifact（可打勾、算進度、可印）。
+- 備註 / 工作目錄澄清：真實專案目錄為 `go_cathy/kkday-go-scheduling`（含原始碼、`.git`、本套 docs）；session 期間曾短暫存在改名前的 `gz_cathy` 空殼，UAT 檔一度誤落其中、已歸位。後續一律用 `go_cathy` 路徑。
+
+## 2026-09-08
+
+- **定案 5 步流程、全文件重寫**（2026-09-08，使用者澄清「維持現況」理解錯誤後）：**① G0 dump（盡快·Cathy）→ ② 照 spec 重構（去 Supabase）→ ③ 本機 compose 能動 → ④ 灌 sample data → ⑤ UAT（本機、安全）**。砍掉「先容器化舊版（維持 Supabase）」的丟棄步；去 Supabase 是**目標**（就在 G0 之後）、非延後；② 卡在 ① dump → G0 最高優先。/ design §0 改 13 列決策 + 5 步 banner；plan Goal/Architecture/總覽改 5 步、舊 Phase 1–7 標「已被取代、工程片段可在 ② 複用」；gap-report 取向、HANDOFF、START-HERE（人 vs AI + G0 最急）、CLAUDE（重構是目標）、G0 指南（盡快·重構靠它）、UAT（改流程 ⑤ 本機安全，不再是「連正式 Supabase 危險」）、決議檔資料層段（待確認→已定案）全部對齊；總覽 HTML 改 5 步。/ ⚠️ codex 額度用完，此輪一致性由 grep 自掃（Cathy 主線 4 檔複驗乾淨、副本 byte 一致）。
+- **交接包精簡/校正（codex 審 handoff-to-cathy 後）+ 「人 vs AI」拆分**（2026-09-08）：codex 判「新定調+舊執行混雜、UAT 不適用 Phase 1」。修正：START-HERE 重寫（白話近期範圍 + 「誰做什麼」人/AI 對照 + docs 標 RD 附錄，Cathy 只讀 START-HERE+G0 指南）；CLAUDE.md 重寫（修 `../G0` 錯連結→同層、移除「Phase 3 可先起」、更正「規範副本已同步」假宣稱、對齊已重寫的 Option 1、加 Claude Desktop 起跑/存取說明、UAT 不適用 Phase 1 警語）；G0 指南補（row-count 估算 vs 精確、第9項填「待 RD 確認」、含個資匯出物不進 repo、交件邊界、還原失敗未必=匯出不全、移除「接 Phase 2」）；UAT 加頂部「日後 EKS 版、Phase 1 仍連正式 Supabase 勿測寫入」警語；HANDOFF/plan Task8 移除殘留「Phase 3 可先起/依時區通知/夜間 CronJob」。
+- **資料層定案（選項 1：維持現況）+ 全文件依 DevOps 定調重寫**（2026-09-08）：近期唯一目標＝容器化現有系統、一個 `docker compose` 本機起來（維持現況、仍連 Supabase）；EKS/RDS/去 Supabase/自管後端**延後**、日後不走 FastAPI。/ design 加「DevOps 重新定調」banner + §0 決策表改 13 列（FastAPI 撤回、RDS/後端延後、SSL 內網不強制、cron→ArgoCD、通知寬窗、北極星=local compose）、§4.3 通知改寫；plan 加 banner + Goal/Architecture/Tech Stack 改寫、階段總覽標「Phase 1 唯一近期交付、Phase 2–7 延後」、Global（SSL/通知）改、Execution Handoff 改；gap-report 目標取向行改（findings 仍為現況分析）；HANDOFF 這包是什麼改；DevOps-sync HTML B 表對齊。舊「選項 A 前後端分離」內容保留作背景。
+- `handoff-to-cathy/G0-EXPORT-GUIDE.md`（新增）/ 給 Cathy + 其 Claude Desktop 的 Supabase 匯出自足指南 / 9 樣（schema/function/RLS/Realtime/Edge Fn/Auth/Storage/row counts/資料）具體到 `pg_dump`/SQL/Dashboard 步驟 + 驗證 + 交付清單；含 DevOps「務必盤點乾淨」交代與第 9 項「查 notification_log 事件型通知」特別任務。START-HERE/CLAUDE 更新指向它、標架構有新決議不受 G0 影響。
+- `2026-09-08-devops-sync-decisions.md`（新增）/ 與 DevOps 主管 sync 的 7 條決議，**推翻部分先前架構決策**（前後端分離、FastAPI、夜間 CronJob）：內網不強制 SSL、排程盡量上班時段、不拆前後端一個 compose、不用 FastAPI、cron 改 ArgoCD/GitOps、G0 強化盤點、目標 local compose。**尚未併入 design/plan 本體**（待資料層方向確認，避免製造矛盾）。/ 另含「通知機制真相」：讀 code 確認 `notification_log` 是無時區欄位的佇列、`dispatch` 每 5 分無腦沖佇列、時區是 display 端轉換、04:00 播報非 ping → **「跨時區 vs 上班時段」衝突大幅縮小**，務實解＝寬工作窗 dispatch + 早發非 ping 廣播；唯一待 G0 確認＝前端動作是否即時塞事件型通知。
+- **一致性複審第三輪（codex gpt-6-astra，1 組摘要漏同步已補）**：HANDOFF 閱讀順序、plan Placeholder-scan、plan 閘門規則三處統一補「Phase 3 骨架/登入可與 G0 並行、資料 endpoint 才待 G0」，與 Phase 3 正文/Execution Handoff 一致。收斂：10→5→1→0（doc 本體）。
+- **一致性複審第二輪（codex gpt-6-astra，5 項殘留全修）**：(MED) plan Architecture「舊平台全程不動」限定為「開發/UAT 期間；Phase 7 才停/退役」；gap-report §6-8 Realtime 標「已定輪詢」；UAT §0 通知前置改「dry-run 零外送 + 受限實送」對齊 F1a/F1b。(LOW) plan Self-Review 移除「workflow 過渡值」宣稱、Execution Handoff 與 CLAUDE.md 補「Phase 3 骨架/登入可與 G0 並行」。
+- **多檔一致性修正（codex gpt-6-astra high-effort 審查，10 項全數採納）**：確認 Cathy 決策已一致落到各文件、無殘留矛盾。
+  - HIGH：**新 repo 決策落進 design + plan**（先前只在交接封面）——design §0 加決策 #11、§1 拓撲與 image 名改 `kkday-vibe-go-scheduling-*`；plan Architecture/Global/Phase 1 改「在新 repo 複製原始碼、現行系統全程不動」，新增 Task 0，**移除 Task 3「改現行 workflow」步驟**（新 repo 模型下不碰舊系統），compose project 名改新 repo。
+  - MED：plan Global 排程加 `dispatch` 跨時區例外；Realtime→輪詢在 gap-report 標「已定」（非待選 WebSocket/SSE）；plan Self-Review 決策數 7→11、§7 狀態改「已定」；**Phase 7 cutover runbook 補「T0- 先停舊 GH Actions 觸發並排空 in-flight，才凍結+最後同步」**（單寫紀律）；design §5.4 第一關範圍對齊 plan（frontend+batch 兩 image，backend 待 Phase 3）；UAT F 通知拆 F1a(dry-run 零外送)/F1b(限收件人實送)。
+  - LOW：design §2.4 sslmode 改 require（同步 plan）；HANDOFF 閱讀順序/CHANGELOG 路徑補 `superpowers/`；gap-report/design 最後修訂日改 09-08；UAT H3「08:30」改「設定的播報時間」；HANDOFF/START-HERE/CLAUDE「Phase 2 以後全卡」軟化為「大多卡（骨架可先起）」。
+- **多檔（gap-report / design / plan / UAT / HANDOFF）併入 Cathy 會議決策（2026-09-08），agy 獨立審查後套用**：
+  - `approve-staff-request` 澄清為「依 request 類型的通用核准流程」，**排除 Slack webhook 假設、降級 §4.6 阻斷判定** → 改後端通用核准 endpoint（gap-report §1.2/§3/§6、design §3.4、plan Phase 6、UAT H2 作廢+H2'）。
+  - `dispatch-notifications` 通知：員工**跨時區**，**推翻「限台北上班時段」**，改「依收件人時區發送」，標 §4.7 張力（gap-report §1.3/§6-13、design §4.3、plan Phase 5/Task8、UAT H4）。**與 scan-f1b 播報（移上班時段，已接受）分開處理**。
+  - 記錄 Cathy 拍板：Realtime→輪詢 ✅、播報移上班時段 ✅、UAT Cathy 主驗收 ✅、個資無阻礙 ✅、Cutover 方案已定。
+  - **確立 G0 負責人 = Cathy**（AI 協助 dump）；多檔同步。
+- `handoff-to-cathy/CLAUDE.md`（新增「近期重構完成驗收條件」段）/ 補上 ②③④ 做完、進 ⑤ UAT 前的技術完成定義 / 起因：驗收條件原散在 plan 各處、部分混在已被取代的 Phase 7 舊段，Cathy 的 AI 恐只抓到 UAT、漏掉技術對數。抽成 6 項 checklist（去 Supabase 盤點乾淨、兩支 Edge Function 行為重建、事件型通知不漏、關鍵表 row-count 對數、endpoint 行為對數、本機一鍵起）；明標 rollback drill / cutover 對數不在近期範圍、屬日後 cutover（plan Phase 7）。不改角色分工（EXECUTOR=Cathy 的 AI、RD 只給 note、Cathy UAT）。
+
+## 2026-09-09
+
+- **交接包 4 檔事實更正（照 `CLAUDE-CODE-FIX-INSTRUCTIONS.md`，改前先讀 code 驗證）**：對照原生 `kkday-go-scheduling` 確認 `StaffRequests.jsx:176` = `supabase.rpc('approve_staff_request')`（DB RPC，非 Edge Function）、全 codebase 唯一 `functions.invoke` = `trigger-task-engine`（`dailyTasksApi.js:434`）。/ 修正：
+  - **重大事實誤判**：`START-HERE.md`、`G0-EXPORT-GUIDE.md`(§5/自驗/交付清單)、`CLAUDE.md`(G0 要點/既定決策/驗收條件第2項)、`docs/HANDOFF.md`(第7項) 全部改為「`approve_staff_request` 是 DB RPC、隨 `01_schema.sql` 匯出、勿去 Edge Functions 頁找；唯一 Edge Function 是 `trigger-task-engine`」。
+  - **G0 操作防呆**：連線字串加「選 Session pooler / Direct（Port 5432），勿用 Transaction pooler(6543) 否則 pg_dump 噴錯」；加「`command not found: pg_dump` → 交 Lance/RD 代跑」；SQL 各項加「可在 Dashboard SQL Editor 跑並下載 CSV」；第9項加 `pg_proc` fallback（非 superuser 查 routine_definition 會空）。
+  - **HANDOFF 矛盾清除**：移除「線 A：Phase 1 容器化現有元件立即做」殘段，對齊 5 步流程「當前唯一線路＝① G0」。
+  - **延伸修正 RD 附錄（Lance 2026-09-09 同意）**：指示僅列 4 檔，但全資料夾掃出同一事實錯誤散在 RD 附錄。已一併修：`plans/…-cloud-ready-migration.md`(§79/818)、`specs/…-target-architecture-design.md`(§36/129/215/239)、`specs/…-gap-report.md`(§43/100/105/138/165) 全部改為「`approve_staff_request` 是 DB RPC、非 Edge Function、隨 `01_schema.sql` 匯出」。特別更正 gap-report §43「呼叫端不在 repo」的事實錯誤（呼叫端在 `StaffRequests.jsx:176`）、plan §818「等 G0 撈 Edge Function」的誤導（改為照 schema dump 的 RPC 定義實作）。保留 2 處刪除線歷史紀錄（gap §156、design §233）不動。
+  - design §0 決策表補 #8 Cutover / #9 通知時區 / #10 通用核准；§7 待業務確認改為「已確認/已推翻/仍未決」三段。
+  - 仍 open：Q7 員工時區分布、Q9 凍結時長/禁切時段、approve-staff-request 原始碼（併 G0）。
+- `../plans/2026-09-07-cloud-ready-migration.md`（codex peer-review 全面修正）/ codex CLI 完整審查產出 5 HIGH + 5 MED，經對照真實碼逐項確認為真、全數採納並修正：
+  - HIGH-1（Task 5）共用 `.dockerignore` 排除 `src/` 會讓前端 build 失敗 → 移除 `src`（batch 用明確 COPY 不受影響）。
+  - HIGH-2（Task 3）`slack_post_message` 實回 tuple `(ok,data)`、呼叫端解包；原 dry-run `return False` 會 TypeError 並把通知誤標 failed → 改回 `(None,{"dry_run":True})` 且呼叫端偵測後跳過台帳更新（保持 pending）。
+  - HIGH-3（Task 3）netlify URL 在 module-level `TEMPLATES` 字面量，改成函式呼叫會在 import 退出 → 改 `{base_url}` 佔位由 `render_message` runtime 注入、fail-fast 移到 `main()` 的 `require_env()`；並同步把 `APP_BASE_URL` 過渡值加進 dispatch workflow，確保線上不中斷。
+  - HIGH-4（Task 6）nginx 以 root/寫 `/var/cache` 於唯讀 pod 起不來 → 改 `nginxinc/nginx-unprivileged`（非 root、預設 8080），驗證加 `--read-only --tmpfs`（同時解掉先前 PORT LOW）。
+  - HIGH-5（新增 G1 閘門）Phase 2 只建空 schema、後續卻寫 RDS 並宣稱可回滾 → 新增「G1 資料遷移與寫入切換閘門」：初始匯入對帳、單一寫入源紀律（禁批次/前端分裂窗口）、增量追平、回切演練；列為 Phase 5/6/7 硬前置，並修正各階段回滾宣稱。
+  - MED-6（Task 4）`ENGINE_ALERT_CHANNEL`/`NOTIFY_CHANNEL` 無 .py 讀取（只在 workflow shell）→ 從 `.env.example` 移除（否則守門測試判 orphan 變紅）；guard 測試改 `rglob`（含 batch/）、regex 涵蓋 `os.getenv`/`os.environ[]`、略過註解與 `.venv`。
+  - MED-7（Task 1）兩個直接依賴非完整 lockfile、測試 venv 無 pytest → 加 `requirements-dev.txt`(pytest)、`constraints.txt`(pip freeze 完整釘版)、統一 `.venv`。
+  - MED-8（Task 3）TDD RED 階段會真打 Slack → 測試 mock `requests.post`、斷言 dry-run 零呼叫。
+  - MED-9（Phase 1 驗收）空設定仍過 health → 明分「無 secret 可 build」與「有效設定可用」，後者留 Phase 6 + UAT；加唯讀/非 root 驗證。
+- `../plans/2026-09-07-cloud-ready-migration.md`（G1 + Phase 7 cutover 方案落地，2026-09-08 與 Cathy 議定）/ G1 增量追平改採「短維護窗(~15分)+最後同步、不做雙寫」，明列關鍵資料（已核准請假/已公佈班表）必進最後同步；Phase 7 補台北凌晨切換 runbook（凍結→最後同步→切 DNS→熱備），標時區提醒與待業務補確認（Q9 凍結時長/禁切時段）。
+- **⚠️ 源 spec 衝突（MED-10，依 CLAUDE.md「先提出不靜默繞過」）**：`vibe-cloud-ready-spec.md` §4.5 指定 `sslmode=no-verify`，但 **libpq/psycopg 不接受此值**（有效值僅 disable/allow/prefer/require/verify-ca/verify-full；`no-verify` 是 Node `pg` 系用語）。本專案後端用 psycopg → 應以 `sslmode=require` 實作（加密不驗 CA，符規範原意）。**上游 spec 未自行修改，僅在此提出**，建議 spec 維護者評估修訂 §4.5 措辭。
