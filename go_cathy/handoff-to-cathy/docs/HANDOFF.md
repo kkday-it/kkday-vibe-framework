@@ -58,11 +58,21 @@ kkday-go-scheduling 目前建在 **Netlify（前端）+ Supabase（BaaS）+ GitH
 
 ---
 
-## 給貴方 AI agent 的一句設定
+## 怎麼指示你的 AI（照這個貼）
 
-請在貴團隊的 AI 系統提示 / `CLAUDE.md` / `.cursorrules` 加：
+> ⚠️ **環境**：`supabase-inventory` skill 與 ②③④ 重構要用**能跑終端、讀 `CLAUDE.md`、裝 skill 的 coding agent**（Claude Code / Cursor 之類）——**不是聊天版 Claude Desktop**。Cathy 提供存取 / 點 Dashboard 那部分才用聊天版。
+
+**① 設定**（加進貴團隊 AI 的系統提示 / `CLAUDE.md` / `.cursorrules`）：
 
 > 「本專案最終部署在公司內部 EKS，開發任何功能前先讀 `docs/superpowers/specs/` 與 `docs/superpowers/plans/`，所有設計必須符合 `vibe-cloud-ready-spec.md` 的約束。」
+
+**② G0 起手**（收到 Cathy 提供的存取後）：
+
+> 「先把這個資料夾當工作目錄開起來（讓你讀到 `CLAUDE.md`）。解開 `supabase-inventory.skill`，用我給的 `SUPABASE_PROJECT_REF` / `SUPABASE_ACCESS_TOKEN` / `SUPABASE_DB_URL` 跑 `scripts/collect_supabase.sh`，全程 `2>&1 | tee collect.log`；跑完**先看 `raw/**/*.err` 與 `raw/api/_status.tsv` 再信 `manifest.json`**（失敗查詢會變空陣列）。完成 G0 就停、交回，不要自己往下重構。」
+
+**③ 重構起手**（G0 出料後）：
+
+> 「照 `docs/superpowers/plans/` 的 5 步流程做 ② 重構（去 Supabase、不拆前後端、不用 FastAPI、一個 docker-compose）；每步照 `CLAUDE.md` 的『留痕紀律』留 log 與原始輸出，供事後 retro。」
 
 ---
 

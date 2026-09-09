@@ -23,9 +23,14 @@
 
 ## 你的主線：Supabase 匯出（G0）— 最急
 
-👉 **打開 `G0-EXPORT-GUIDE.md`，交給你的 Claude Desktop，說「照這份一步步幫我匯出」。** 你只要：
-- 提供 **Supabase 連線字串 + Dashboard 登入**（指南開頭有列在哪拿）。
+👉 **打開 `G0-EXPORT-GUIDE.md`，交給你的 Claude Desktop，貼這句：**
+
+> 「照 `G0-EXPORT-GUIDE.md` 一步步幫我從 Supabase 匯出；要在 Dashboard 點畫面的地方，告訴我怎麼點。我會提供專案 ref、access token、DB 連線字串。」
+
+你只要：
+- 提供 **Supabase 連線字串 + Dashboard 登入 + access token**（指南開頭有列在哪拿）。
 - 遇到「要在畫面點/截圖」的（Edge Function、Auth、Storage），照 AI 指示操作。
+- ⚙️ **自動盤點 skill 與後面的重構要用「能跑程式的 AI」**（RD 那邊的 Claude Code / coding agent）——聊天版 Claude Desktop 跑不了。你這關只要提供存取 + 照指示點 Dashboard 就好。
 
 重點提醒（DevOps 主管交代）：**Supabase 常有很多輔助功能（trigger / view / Realtime / Edge Function / Storage），務必盤點乾淨、不要漏**——漏一個，重構時就會「少一塊、安靜出錯」。
 > ✅ **一個常見誤會先講清楚**：`approve_staff_request`（員工核准）**是資料庫裡的 RPC，不是 Edge Function**——它會隨 schema 匯出（`01_schema.sql`），**不用**去 Edge Functions 頁面找它。真正要從 Dashboard 撈的 Edge Function 只有 **`trigger-task-engine`** 一支。
