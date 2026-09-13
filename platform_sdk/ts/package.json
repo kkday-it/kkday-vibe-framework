@@ -8,8 +8,8 @@
     "build": "tsc"
   },
   "dependencies": {
-    "playwright": "^1.45.1",
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.3.2",
+    "playwright": "^1.45.1"
   },
   "optionalDependencies": {
     "@aws-sdk/client-s3": "^3.600.0"
