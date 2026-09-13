@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/session-inject.sh\"",
+            "timeout": 5,
+            "statusMessage": "載入 kkday vibe coding 規範..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-guard.sh\"",
+            "timeout": 30,
+            "statusMessage": "vibe guard 檢查中..."
+          }
+        ]
+      }
+    ]
+  }
+}

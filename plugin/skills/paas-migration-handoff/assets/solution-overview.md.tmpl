@@ -1,0 +1,42 @@
+# {{系統名}} 上雲遷移 — 解法與重構計畫
+
+- 對照規範：`{{cloud-ready-spec}}.md`
+- 現況來源：實讀 `{{repo}}`（非二手描述）+ {{工程師評估文件（若有）}}
+- 前置 review：{{cloud-ready-review 產的 HTML（若有）}}
+
+> 狀態：roadmap 級。重構細計畫等 G0 出料才寫得出真 code。本文件定形狀、定決策、定平台閘門。
+
+## 0. 一句話結論
+{{這套系統今天沒有後端應用層 / PaaS 同時是 auth+data API+authz+背景排程；上雲不是搬 DB+改登入，而是要新建後端服務…}}
+
+## 1. 現況（實讀 repo 確認）
+{{逐層表：前端形狀 / 登入 / 資料存取 / 授權 / 商業邏輯 / 排程，各自綁 PaaS 程度}}
+{{列出：N 張表、M 個 view、狀態表、背景服務清單、對外依賴}}
+
+## 2. 目標架構（形狀：不拆前後端、不用 FastAPI、一個 docker-compose）
+{{拓撲圖：A 型服務容器（前端靜態+data API+auth+授權）/ B 型批次 CronJob（背景服務）/ Postgres}}
+- 新 repo：`{{kkday-vibe-<name>}}`（全小寫 kebab；= image 名 = k8s 名）。現行不動、平行。
+- image 能合就合：前端＋API 同一容器。
+
+## 3. 跟過往案子的關鍵差異（別無腦照抄）
+{{表：前端耦合 / 背景服務數量 / 排程時段 / egress / 資料流 / 個資，這案各是什麼、影響什麼}}
+
+## 4. 平台閘門（跟平台談的先後）
+{{排序，最優先在前。常見：24/7 不可中斷排程 vs 夜間縮容（規範例外，先談）；對外 egress 白名單；PaaS 存取}}
+
+## 5. 去 PaaS 做法（依 G0 定細節）
+- 資料層：schema→`db/migrations/0001_baseline.sql` forward-only；app 帳號只 CRUD；連線池小。
+- 認證：{{PaaS auth}} → {{OAuth}} + JWT（callback 由 env 組）。
+- 授權：RLS → 應用層（用 G0 policy 當權威重寫）。
+- 背景服務：Edge/cron → B 型 CronJob，一個 batch image + args；idempotent 靠台帳。
+- {{核心業務流程：搬到後端 or 保留前端，行為對數一致；特殊編碼要保}}。
+
+## 6. 5 步流程 + G0 盤點閘門
+{{① G0 → ② 重構 → ③ compose → ④ data → ⑤ UAT；G0 待盤點清單}}
+
+## 7. 可立即開始（第一關，不卡 G0/平台）
+{{本機 Postgres、參數進 .env.example、去 CDN、對外送出開關預設關、守門測試}}
+
+## 8. 下一步
+- PM：照 `G0-EXPORT-GUIDE.md` 做 G0（最急）。
+- RD：G0 出料後展開重構細計畫；先做第一關；先談 §4 平台閘門。

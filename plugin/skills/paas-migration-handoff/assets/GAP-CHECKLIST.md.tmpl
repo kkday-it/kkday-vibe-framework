@@ -1,0 +1,89 @@
+# Round 2 缺口補齊清單（給 Cathy 的 AI 執行）
+
+目標：把「重構一次到位」還缺的補齊。**不重做 G0**——round 1 的 `supabase-export/` 已很完整，這裡只補三類缺口。每項標了誰做、為什麼重構需要它。
+
+> 環境：這次請在 **Cathy 自己 Mac 上的 Claude Desktop Code** 跑（有終端機、能裝 `psql`、連得到 DB）。憑證與個資**全程留在她 Mac，不上雲、不外傳**。
+
+---
+
+## A 段【工程已決定，不用問 Cathy】記錄供重構
+
+這些原本列成「待確認」，但都是讀 code 就能定的工程判斷——**已決定，記錄在此供重構直接用，不要拿去問 Cathy（非工程不管這些）**。也一併填進 `g0-report.html` 把待確認標「已解」。
+
+1. **4 支 `SECURITY DEFINER` view**（`v_my_today` / `v_holidays_with_perms` / `v_my_team` / `v_visible_orgs`）＝使用者可視範圍 view。**決定**：重構把授權移應用層（每 endpoint 用 JWT 內 staff/role/org 判斷），這 4 支的可視邏輯照 view 定義重寫進 API。**刻意或遺留都不影響做法**，所以不用問。（重構時 AI 直接從 `schema_real.sql` 讀 `CREATE VIEW` 定義，或在還原後的本機容器查——**不要連線上**。）
+2. **「開放註冊 ON + email 驗證 OFF」**：**決定**：目標認證已定＝Google OAuth 限 `@kkday.com`。遷移後這兩個設定作廢（OAuth + 網域限制取代），現況是否刻意不影響目標。不用問。
+3. **寫死的 Slack 目標**（已從 code 取出）：頻道 `C0B4J81M76K`（約 9 處）＋ 4 個 PM tag `<@UF4UFGGNR> <@U08091MUAJX> <@U06DZJ5AK0F> <@U056ZV4C04R>`。**決定**：重構參數化進 env / 設定表，**初始值照搬上面這些以保行為**。值都在 code、不用問。
+4. **`check_email_domain()`**：**已讀 body**——擋 `email !~* '@kkday\.com$'`、否則 raise exception（註解：要擴充 @kkday.com.tw 改這裡）。＝登入網域限制落點，Google OAuth `hd=kkday.com` 覆蓋。已解。
+5. **其他半成品 / 寫死值**：**工程掃描負責**，不問 Cathy。已知：`approve-staff-request` edge（Phase 3.1a 死 stub）、上面的寫死 Slack ID、function 內寫死 UTC+8 標籤（code 註解標已改進中）。重構時全庫 grep 收斂。
+
+> 只有一項是真的要人拍板，而且是給 **Lance 不是 Cathy** ——見文末「repo / 金鑰」段落。
+
+---
+
+## B 段【認證照公司 SSO 規範，不盤舊設定】— Cathy 這邊沒事做
+
+Round 1 原本想補抄 Supabase Auth 的 Sessions / MFA / Rate Limits / Email 樣板——**取消**。那些是這個 vibe tool 的臨時預設，重構不該照它做。
+
+**決定**：認證改公司 **Google SSO**，session 效期 / MFA / rate limit 一律**照公司 SSO 規範**，不是抄舊設定。
+- 唯一要保的行為＝ `@kkday.com` 網域限制（已確認在 `check_email_domain()`；OAuth `hd=kkday.com` 覆蓋）。
+- ⏳ 待補：**公司 SSO 規範文件**（session / MFA / rate-limit policy）由 platform / security 提供 → RD 照它設。這不是 Cathy 的事。
+
+→ 所以 B 段 Cathy 這邊**沒有動作**。
+
+---
+
+## C 段【你 Mac 本機跑一個腳本，產物留本機】DB 直連才能拿的
+
+**重點：在 Cathy 的 Mac 上跑，`pg_dump` 真檔 + 資料 + 筆數就地存本機，餵後續重構用，不傳回 Lance、不上雲。** 只有「聚合筆數」進報告。
+
+做成一個腳本 `collect-round2.sh`，Cathy 只做「填連線參數 + 跑一個指令」，其餘 AI 代打：
+
+1. **裝工具**（AI 幫忙）：`brew install libpq`（macOS，提供 `psql` / `pg_dump`；裝完把它的 bin 加進 PATH）。
+2. **填連線參數**：
+   ```bash
+   cp .env.example .env
+   # 編輯 .env，填 PGHOST/PGPORT/PGDATABASE/PGUSER/DB_PASSWORD
+   # （Dashboard → Database → Connection parameters；Session pooler / Port 5432）
+   ```
+   > ⚠️ 不要選 Transaction pooler（6543），`pg_dump` 會噴錯。
+   > 🔒 連線參數只在 `.env`（已被同層 `.gitignore` 擋、不進版控、不外傳）。不貼雲端、不貼 Slack。
+3. **跑**：
+   ```bash
+   ./collect-round2.sh
+   ```
+   它會產（存進 `~/kkday-go-migration-local`，自動 gitignore、留本機）：
+   - `schema_real.sql` — 真 pg_dump schema，比對 round 1 `01_schema_reconstructed.sql`（重建版是否有漏）
+   - `data.sql` — 含員工個資，**永遠留本機、不傳出、不進報告**，供重構的本機灌資料 / 對數 / UAT
+   - `row_counts_exact.tsv` — 逐表精確 `count(*)`（取代 round 1 估計值）
+   - 並把**聚合筆數印到畫面**——那份純數字、無個資，可填進報告
+
+> 這些指令 AI 會自己打，Cathy 只填 `.env` 的連線參數 + 在終端按同意。
+> 🔒 **AI 不得讀取、複製、貼出 `.env` 的內容**（含密碼）；`.env` 只有 Cathy 在本機自己編輯。
+
+---
+
+## C 段之後：AI 自動接續重構 → 本機 UAT → PR
+
+C 段資料一到手，**不要停在交報告**——照 `AFTER-G0-AUTO-REFACTOR.md` 自動接著跑 ②③④⑤：開 branch（org repo）→ 去 Supabase 重構（照 round-1 規範＋架構設計文件 + G0 出料）→ 本機 `compose up` + 灌 `data.sql` 跑 UAT → 綠了開 PR 給 RD review。
+
+**人的關卡是 PR，不是中途每一步。** 硬 guardrail（見那份）：不碰個人 repo/線上、branch 不接 prod secrets、個資只留本機、撞到業務/承重決策就停下問人、**不自己 merge**。
+
+---
+
+## repo / 金鑰（釐清：不用「搬」repo）
+
+重構目標 repo **`kkday-it/kkday-vibe-go-scheduling` 已經建好**（org、private）。去 Supabase 的新版就寫在這裡，用 org 自己的 secrets（config-manager），**不沿用個人帳號那三把金鑰**。所以：
+
+- **不需要「轉移」個人 repo**。舊的 `cathyhui-ctrl/kkday-go-scheduling` 維持現況、繼續營運，**cutover 後退役**即可。
+- **唯一殘留的治理點**：cutover 之前，舊線上系統仍跑在個人帳號 + 個人 GitHub secrets（含 `SUPABASE_SERVICE_ROLE_KEY` 上帝金鑰）。若這個過渡窗要提前降風險，可**先換掉/鎖定**那三把金鑰。→ **Lance 的小決定，不是 Cathy 的事、也不卡 G0/重構。**
+
+---
+
+## 交付（分兩種，務必分清楚）
+
+| 產物 | 去哪 | 含個資？ |
+|---|---|---|
+| A 段工程決定、C 段**聚合筆數** | 填進 `g0-report.html` → Cathy 轉傳 Lance | ❌ 否，可轉傳 |
+| C 段 `schema_real.sql` / `data.sql` / 筆數原始輸出 | **留 Cathy Mac 本機**（gitignored 資料夾），供後續重構 | ✅ 含個資，不外傳 |
+
+> 更新 `g0-report.html`（本資料夾內、已填好 round-1 成果的那份）時：把 A 段工程決定、C 段聚合筆數補上，待確認能結的標「已解」；**不要用空白模板重填、以免丟失 round-1 內容**。報告「不含個資、憑證、原始資料列」聲明維持不變。

@@ -1,0 +1,107 @@
+# G0 之後：自動接續重構 → 本機 UAT → PR（給 AI 執行，選項 A：跑在 Cathy Mac）
+
+C 段資料一到手，**不要停在交報告**——照這份把 ②③④⑤ 跑完，最後開 PR 給 RD review、並起本機容器提醒 Cathy 做 UAT。
+
+## 前提（選項 A）
+- **C 段完成**：C 段產物路徑（`.env` 的 `OUT_DIR`，未設則預設 `~/kkday-go-migration-local`）下有 `schema_real.sql` / `data.sql` / `row_counts_exact.tsv` + `COLLECTION.COMPLETE`。
+- **料齊**：**重構的權威來源＝C 段的 `schema_real.sql`**（已含真實 153 函式 + RLS + trigger + view，不需 round-1 重建版）；另需 round-1 的規範/架構文件（`vibe-cloud-ready-spec` + `cloud-ready-target-architecture-design`，與此 handoff 同批交付；缺就向 RD/Lance 取）＋ 已 clone 的 GitHub Actions 8 + Python 引擎。**開工前確認這些都在，缺就先取得、不要硬開工。**
+- **目標 repo**：`kkday-it/kkday-vibe-go-scheduling`（已 clone；**目前是舊碼 copy**）。
+- **能力**：對 org repo 有 push 權（開 PR）、本機有 Docker、本機有 C 段資料。缺哪個先補（裝 Docker / `gh auth` 確認 org 權限）。
+
+## Preflight（開工前**跑 `preflight.sh`**，fail-closed；沒過就不要開始）
+
+`preflight.sh`（隨此 handoff 附）是**可執行版** guardrail，不是文字要求；任一不過即 `exit≠0`。跑法：複製到目標 repo 根目錄，`NOTIFY_DRY_RUN=1 OUT_DIR=<C段路徑> ./preflight.sh`。它檢查：
+1. **釘死目標 repo**：origin 必須是 `kkday-it/kkday-vibe-go-scheduling`；不是就先 clone/cd 目標 repo（**絕不在 `cathyhui-ctrl` 個人 repo 或線上動**）。
+2. **掃本次 staged diff ＋ 相對 base（依序試 origin/main→origin/master→main→master）的分支新增行**（`git diff --cached` ＋ `git diff base...HEAD`，**只看新增的 `+` 行**——刪除舊金鑰的 `-` 行不算，否則清理舊碼的 commit 會被自己誤擋；**排除 `*.md` 決策檔**避免自我觸發。注意：base＝舊碼 copy，舊碼殘留在 base 不會進 `base...HEAD`）：比對泛化 supabase ref `[a-z0-9]{20}.supabase.co` 與有值的 prod secret（`…=eyJ`/`…=xox`/`gh[pousr]_…`）；**不比對 `@kkday.com`**（系統常數/commit author，會誤判）。命中 → 停。
+3. **強制 dry-run**：`NOTIFY_DRY_RUN=1`。
+4. **C 段完成**：`OUT_DIR`（handoff `.env` 的值，未設用預設 `~/kkday-go-migration-local`）下 `COLLECTION.COMPLETE` + 三個產物檔都在。
+
+> 開工前跑一遍、把 `✅ PREFLIGHT PASS` 記進 `REFACTOR-DECISIONS.md`（**只記結論不記 ref 字串**，免得決策檔自己被掃到）。**禁 `gh pr merge`／merge API 是行為規則**（見 Guardrails），preflight 不機械擋，但你不得做。
+
+## 核心原則（你要的行為）
+- **G0 已做完整盤點 → 撞到工程卡點，以工程師角度自己解，不停下來等 Cathy。** 但**每一個假設 / 繞路 / 卡點怎麼解，寫進 `REFACTOR-DECISIONS.md`（commit 進 branch、附 PR）**——「不依賴 Cathy，但可追溯」。
+- **只有這幾類才升級問人**：業務行為要改、不可逆動作、規格自相矛盾、某 RPC 語意不明且會影響輸出行為。**auth 的實際 SSO 設定不在此列**——由 DevOps 接手注入（見「重構對照」auth 列），AI 不填假預設值、只留 env/secret 讀取介面，缺的標 `TODO(DevOps 注入 SSO 設定)` 即可，不必停下等。其餘自己判、記錄即可。
+- **自主邊界 = PR + Cathy UAT**；**不自己 merge**。
+
+## 主管線（照公司流程，不跳步）
+1. **寫計畫**（superpowers `writing-plans`）：bite-sized，第一關（本機化）先。**分階段、每階段一個可 review 的 PR**（容器化 → schema/migrations → 資料層+API → auth → 批次/排程），**不要 big-bang 一顆 5 萬行 PR**——那沒人 review 得動。
+2. **開 branch**：`git checkout -b refactor/de-supabase-YYYYMMDD`。**清掉舊 copy 的 Supabase 耦合殘留**（`netlify.toml`、複製進來的 `.github/workflows/` 別留著誤跑）；main 不動。
+3. **執行**（`subagent-driven-development` + `test-driven-development`）：逐塊搬、逐塊驗、小 commit。對照下表。
+4. **本機 UAT（③④⑤）**：見下節。
+5. **收尾 → PR**（`verification-before-completion` 過）：分階段開 PR，body 附「spec 對照 + 本機 UAT 證據 + `REFACTOR-DECISIONS.md` 摘要 + 已知 TODO」→ request review（RD/Lance）→ **停在這等人 review。**
+
+## 重構對照（去 Supabase）
+| 現況 | 目標 | 料來源 |
+|---|---|---|
+| Supabase schema | `db/migrations/0001_baseline.sql` forward-only | `schema_real.sql` |
+| 前端直連 + Supabase client | 新後端 data API，前端改打它 | `src/` + 121 處 `.from/.rpc` |
+| RLS 授權 | 應用層授權（JWT 內 staff/role/org） | `schema_real.sql`（RLS policy + view 定義） |
+| 153 DB 函式 | **多數原樣搬進 `db/migrations/`（版控、不重寫）**；只有授權那塊搬應用層（見「驗收策略」） | `schema_real.sql`（含 153 函式定義） |
+| Supabase Auth | Google OAuth + JWT（讀取介面）；本機 dev-login | **實際 SSO 設定由 DevOps 注入**：client id/secret、redirect URI、hosted domain(`kkday.com`)、session/MFA 全走 env/secret，**重構端只留讀取介面、不寫死不填假值**（OAuth client 註冊需 GCP Console，是 DevOps/RD 人工步驟）。本機 UAT 走 `DEV_LOGIN=1`，與真 SSO 解耦 |
+| GitHub Actions 8 + pg_cron 5 | batch image + CronJob（`args` 分派） | 已 clone 的 workflow + cron 清單 |
+| 寫死 Slack/PM id、對外 CDN | 參數化進 env/設定表、本地打包 | A 段已抽出的值 |
+| 形狀 | **建議 Node.js/Express 單容器**（同時託管 Vite 靜態產物與 `/api`）；不拆前後端、不用 FastAPI、一個 compose | spec §1.1 |
+
+## 驗收策略（153 函式怎麼驗 —— 不是手寫 153 個 test）
+
+**先縮小題目：多數函式不重寫、不逐支重驗。**
+
+1. **多數原樣搬 = 免逐支 diff；但 auth-context 那層要先接新 auth。** 153 支標準 plpgsql 搬進 `db/migrations/`（版控、RDS 原生能跑），對「不碰 auth 的純業務函式」免逐支 diff——但**仍要過一次 env-compat 檢查（RDS extension / timezone / `search_path` / collation / role 權限差異）＋ 每支 public/exported 函式一次 smoke（能跑、回傳型別對）**；byte 一致不代表環境行為一致。
+   - 🔴 **例外（要改 + 要驗）**：**27 支直接叫 `auth.email()/auth.jwt()`**，以及 `current_staff_id()`（被引用 29 次）、`current_user_role()`、`current_staff()`、`current_staff_role()`、`current_bu()` 這幾支 **context wrapper**——它們依賴 Supabase 的 `auth.*`，離開 Supabase 就不存在（round 1 還原時就得建 `auth.uid()/email()/jwt()` stub 才跑得起來）。
+   - **作法**：把這幾支 wrapper 改成**讀新的 JWT/session（不是 `auth.uid`）＝一個 auth-context shim**。改好之後，**下游一大票呼叫 `current_staff_id()` 的函式就不用動、照樣 riding along**。所以「原樣搬」對純業務函式成立、對 auth-context 那層不成立——**後者跟授權那塊一起改、一起驗**（也是差異測試的重點對象）。
+   - 🔴 **shim 必須用 transaction-scoped GUC，且 fail-closed**：middleware 每筆請求**顯式 `BEGIN` → `set_config('app.current_staff_id', <id>, true)` → 查詢 → `COMMIT/ROLLBACK` → release client**（Node `pg.Pool` 預設 autocommit，`is_local` GUC 撐不過單句、下一句就變 NULL）。wrapper 讀 `current_setting('app.current_staff_id', true)`，**取不到 context 時 `RAISE`（fail-closed），不可回 NULL 靜默放行**；加一個「連線池複用不跨用戶」的測試。
+   - spec §4.5「別放 DB function」的顧慮（不在版控 / review 看不到）靠「commit 進 repo」就解；把邏輯翻寫到 app 層是**日後重構、不在這次範圍**——硬翻全部才會製造「無法驗的 153」。
+
+2. **只驗真的變的兩塊：**
+   - **API 對接**（前端 121 處 `.rpc/.from` → 新 endpoint）：驗「打對函式、參數對、回傳 shape 對」。實際 endpoint 數遠少於 153（很多是內部 helper）。
+   - **授權**（69 RLS → 應用層）：唯一邏輯真的搬家處。用 **role × resource 矩陣**驗「誰能看/改什麼」對不對——是 69 條 policy，不是 153 函式。
+
+3. **對「真的要重寫的少數」→ 拿舊函式當 oracle 做差異測試（腳本自動化，不手刻）：**
+   ```
+   同一份 seeded data.sql
+     ├─ 舊函式容器（schema_real.sql 建，含原 153 支）← oracle（golden reference）
+     └─ 新實作
+        → 自動 diff：回傳值 + DB 狀態 delta（哪幾列改了）
+   ```
+   輸入從 `pg_proc` 列函式、從真資料抽 id 生成。是 golden-master / characterization test，不是手寫 case。
+
+4. **依函式型態分 diff 法**（⚠️ **只對「真的被翻寫」的函式做 diff**——原樣留在 migration 的函式不做 diff，只過語法/還原驗證。下表是各型態「若被翻寫」時的 diff 法，不是叫你把所有函式都架雙容器）：
+   | 型態 | diff 什麼 |
+   |---|---|
+   | 純/讀取 helper（`current_staff`、`fn_check_weekly_hours`） | 抽樣輸入，比回傳值 |
+   | 寫入 mutation（`submit_pto`、`fn_accept_swap_request`） | transaction 內跑 + rollback，比狀態 delta |
+   | 通知 emitter（`fn_emit_*`） | 比寫進 `notification_log` 的列（channel/type/recipient） |
+   | 掃描 batch（`fn_scan_*`） | 跑一次，比寫出的通知 / 回傳筆數 |
+   | OR-Tools 引擎（`*_engine.py`，**不在 153 內**；演算法原樣、DB 存取改直連 PG） | 比「班表合法 + 目標值」，不逐格一致（solver 非確定） |
+
+5. **Cathy UAT = 驗體驗、不驗正確性。** 端到端人肉點一遍；正確性靠上面的自動對照。**別讓她扛 153 支。**
+
+**要先處理的硬點**：非確定性（`now()`/排序/隨機）先固定；依 `auth.uid()` 的要模擬使用者 context；OR-Tools 只比合法 + 目標值。都是有限的技術問題，不是 153 個未知。
+
+> 這也定了執行順序：**先搬（migrations）+ 建立對照測試信心 → 再翻寫授權 → Cathy UAT 收尾**，每階段一個 PR。
+
+## 本機 UAT（讓 Cathy 能真的測）
+1. **種資料進 postgres container**：本機 compose 的 postgres **只**用 C 段 `data.sql` 灌（🔴 **重構/UAT 階段不得再連線上 Supabase／不得 re-fetch**）——功能 UAT 吃這份真資料。🔒 個資只在本機、不進 git/PR。
+2. **登入要能走通**（🔴 gate，不是三選一）：新版走 Google OAuth，Cathy 在 localhost 未必登得進去。**選定並實作一條 local login path**——建議：**dev-only 登入端點**——**只在 `NODE_ENV=development` 且 `DEV_LOGIN=1` 才註冊；偵測到 production/非 local 就直接拒啟動（fail-closed）**。
+   - **登入身分 = `cathy.hui@kkday.com`（免密碼）**：dev-login **不驗密碼**——`DEV_LOGIN=1` 時直接以這個 email 身分簽發 JWT（目標系統是 Google OAuth、本來就沒有帳密登入；**不要**設或寫任何密碼進 repo，明文密碼會踩自己的 preflight/PII 防線）。想「打字登入」就讓端點只收 email、比對是否為允許的測試身分後發 JWT。
+   - **🔴 email 要對得上 `data.sql` 裡一筆真的 staff 記錄**（有 staff_id / role / BU），否則 `current_staff_id()`／授權那層 resolve 不到、看不到班表。若 `cathy.hui@kkday.com` 已在真資料裡 → 直接用（拿她的真權限）；若不在 → 種一筆權限足夠跑完 UAT 的測試 staff。要同時測員工端與主管核准端就種兩個身分，端點給下拉選。
+   - （🔴 Docker 綁定分清楚：**容器內 Node 服務 listen `0.0.0.0`**，「只 localhost」的限制做在 compose 的 host port 綁定 `ports: ["127.0.0.1:PORT:PORT"]`——否則 Mac 瀏覽器連不進容器。）
+   - **必須先自己驗證這條路真的登得進去**，才通知 Cathy／開 PR——**登不進去就停，不准開綠 PR。**
+3. **對外副作用全關**：`NOTIFY_DRY_RUN=1`（不發真 Slack）；批次打 GitHub/氣象/外部的部分 stub 或 dry（不觸發真 workflow、不打真 API）。
+4. **自動起容器 + 通知**：前置就緒 → `docker compose up` → 在 Cathy Mac **印出/開瀏覽器到 `http://localhost:<PORT>`**，附**測試帳號**與 **UAT checklist**，提醒她開始測。
+5. **UAT checklist**：對真實流程列（登入 / 看班表 / 偏好 / 換班 / 請假 / 核准 / 通知 / 跑引擎）。沿用並更新 case-1 的 `uat-checklist-cathy`。
+6. **這是 loop 不是一次**：Cathy 測到問題 → 回報 → AI 在 branch 修 → 重啟容器 → 再測。session 要能續。
+
+## Guardrails（硬規則）
+- 🔧 工程卡點自己解 + 記 `REFACTOR-DECISIONS.md`；**不停等 Cathy**。升級問人只限上面「核心原則」列的那幾類。
+- 🚫 不碰 `cathyhui-ctrl` 個人 repo、不碰線上、branch 不接 prod secrets、不發真通知/不觸發真 workflow。
+- 🔒 個資 `data.sql` 只本機灌，不進 git/PR/外傳。
+- ⚠️ **UAT 資料 ≠ cutover 資料**：本機 dump 做功能 UAT OK；cutover 對數要最後一次 fresh sync（G1 gate），別把 UAT 過當成資料遷移完成。
+- ✋ PR 是唯一終點，**不自己 merge**。
+- 🧱 **階段權限邊界**：採集（C 段）／重構／開 PR 是三個階段——重構與 PR 階段**不需要也不要再開啟 `data.sql`**（那是 UAT 灌 container 用，不進 code/commit/PR）。
+- 🔎 **開 PR 前掃**：**機械掃描**（`preflight.sh` 同規則）涵蓋 `git diff --cached` ＋ `base...HEAD` 的**新增行**真金鑰 pattern，命中就停；**PR body / log 由你人工確認別貼個資或金鑰**（這兩者未機械化）；`data.sql` 本來就不進 commit（見上一條）。**不比對 `@kkday.com`**（系統常數/commit author，會誤判）。
+
+## 交付
+- **分階段 PR**（每個可 review）+ `REFACTOR-DECISIONS.md` + 本機 UAT 證據（截圖/log）。
+- 更新 `g0-report.html`（去個資）：補「重構已啟動 + PR 連結」。
+- 個資產物續留本機。

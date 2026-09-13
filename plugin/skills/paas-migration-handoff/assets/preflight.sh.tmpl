@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# 自動重構開工前必跑；任一檢查失敗即 exit≠0（fail-closed）。在目標 repo 根目錄執行。
+# 用法：NOTIFY_DRY_RUN=1 OUT_DIR=<C段產物路徑> ./preflight.sh
+#       （OUT_DIR 未設用預設 ~/{{APP}}-migration-local）
+set -euo pipefail
+fail(){ echo "❌ PREFLIGHT FAIL: $*" >&2; exit 1; }
+
+# 切到 repo 頂層，避免在子目錄執行時 diff 範圍(-- .)漏掃頂層以外的檔
+_root="$(git rev-parse --show-toplevel 2>/dev/null)" || fail "不在 git repo 內（請在目標 repo 內執行）"
+cd "$_root" || fail "無法進入 repo 根目錄：$_root"
+
+# 敏感特徵：只比對「有值」的 secret（避免 .env.example 的空 KEY= 誤判）＋ 泛化 supabase ref
+SECRET_RE='[a-z0-9]{20}\.supabase\.co|SUPABASE_SERVICE_ROLE_KEY[[:space:]]*=[[:space:]]*['"'"'"]?eyJ|SLACK_BOT_TOKEN[[:space:]]*=[[:space:]]*['"'"'"]?xox|GH_TOKEN[[:space:]]*=[[:space:]]*['"'"'"]?(gh[pousr]_|github_pat_)|(gh[pousr]_|github_pat_)[A-Za-z0-9_]{20,}|eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}'
+
+# 1. 釘死目標 repo（含 github.com host 的精確 allowlist——不是子字串、也不能只比 owner/repo，
+#    否則 evil.example.com/kkday-it/kkday-vibe-go-scheduling 會過關）
+origin="$(git remote get-url origin 2>/dev/null || echo '')"
+origin="${origin%/}"; origin="${origin%.git}"; origin="${origin%/}"
+# {{FILL: 換成這案的目標 org repo slug，三種 remote 形式都要列}}
+case "$origin" in
+  https://github.com/{{TARGET_REPO_SLUG}}|\
+  git@github.com:{{TARGET_REPO_SLUG}}|\
+  ssh://git@github.com/{{TARGET_REPO_SLUG}}) : ;;
+  *) fail "當前 repo 不是 github.com/{{TARGET_REPO_SLUG}}（origin=${origin}）；請先 clone/cd 目標 repo" ;;
+esac
+
+# 2. 掃「本次引入的新增行」——staged diff ＋ branch(vs base) diff；只看 + 行（濾掉刪除舊金鑰的 - 行，
+#    否則清理舊碼的 commit 會被自己誤擋）；排除 *.md 決策檔；不比對 @kkday.com 系統常數
+# 依序試 origin/main → origin/master → main → master（KKday/本 framework 有 master 預設先例）；
+# 全失敗才 fail（仍 fail-closed，不會靜默放行未驗證內容）
+base="$(git merge-base HEAD origin/main 2>/dev/null \
+     || git merge-base HEAD origin/master 2>/dev/null \
+     || git merge-base HEAD main 2>/dev/null \
+     || git merge-base HEAD master 2>/dev/null \
+     || echo '')"
+[ -n "$base" ] || fail "無法定位 base branch（origin/main、origin/master、main、master 都試過）——無法驗證 branch 內容；確認在正確的 repo/branch"
+# git diff 若「出錯」要 fail-closed（不能把錯誤吞成空 added 而漏掃）；「無變更」則是正常空輸出
+d1="$(git --no-pager diff --no-color --cached -- . ':(exclude)*.md')" || fail "git diff --cached 失敗，無法驗證變更"
+d2="$(git --no-pager diff --no-color "$base"...HEAD -- . ':(exclude)*.md')" || fail "git diff ${base}...HEAD 失敗，無法驗證變更"
+added="$(printf '%s\n%s' "$d1" "$d2" | grep -E '^\+[^+]' || true)"
+# 不用 grep -q：-q 命中即早退，printf 收 SIGPIPE，在 pipefail 下會讓 pipeline 回非零 → 反而漏擋。
+# grep -E ... >/dev/null 會讀完全部輸入、不早退，命中即 fail-closed。
+if [ -n "$added" ] && printf '%s' "$added" | grep -E "$SECRET_RE" >/dev/null; then
+  fail "新增內容含線上 supabase ref 或 prod secret，請移除再繼續"
+fi
+
+# 3. 強制 dry-run（不發真通知）
+[ "${NOTIFY_DRY_RUN:-}" = "1" ] || fail "NOTIFY_DRY_RUN 必須=1（跑法：NOTIFY_DRY_RUN=1 OUT_DIR=... ./preflight.sh）"
+
+# 4. C 段完成 + 產物路徑本身安全（與 collect-round2.sh 同等的 OUT_DIR 防線）
+# OUT_DIR 必須等於 collect-round2.sh 跑時 .env 裡設的那個值（否則會在下面找不到 COMPLETE 而 fail）
+OUT="${OUT_DIR:-$HOME/{{APP}}-migration-local}"; OUT="${OUT/#\~/$HOME}"
+case "$OUT" in /*) : ;; *) fail "OUT_DIR 必須是絕對路徑：$OUT" ;; esac
+case "$OUT" in "$HOME"|"$HOME/") fail "OUT_DIR 不要設成家目錄本身：$OUT" ;; esac
+case "$OUT" in *"/../"*|*"/..") fail "OUT_DIR 不要含 .. 路徑段（會繞過同步夾防線）：$OUT" ;; esac
+# 與 collect-round2.sh 同等：解實體路徑（打穿 symlink）後對 $OUT 與 $OUT_RP 都比對
+_anc="$OUT"; while [ ! -d "$_anc" ]; do _anc="$(dirname "$_anc")"; [ "$_anc" = "/" ] && break; done
+_anc_rp="$(cd "$_anc" 2>/dev/null && pwd -P || echo "$_anc")"
+_leaf="${OUT#"$_anc"}"; OUT_RP="${_anc_rp%/}${_leaf:+/${_leaf#/}}"
+for p in "$OUT" "$OUT_RP"; do
+  case "$p" in
+    *"Library/Mobile Documents"*|*"Library/CloudStorage"*|*iCloud*|*Dropbox*|*"/Google Drive"*|*GoogleDrive-*|*OneDrive*|"$HOME/Documents"|"$HOME/Documents/"*|"$HOME/Desktop"|"$HOME/Desktop/"*)
+      fail "OUT_DIR 落在雲端同步夾/Documents/Desktop（含個資會外傳）：$p" ;;
+  esac
+done
+if git -C "$OUT_RP" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  fail "OUT_DIR 落在 git repo 內（個資可能被 commit）：$OUT"
+fi
+[ -f "$OUT/COLLECTION.COMPLETE" ] || fail "缺 $OUT/COLLECTION.COMPLETE（C 段未完成或 OUT_DIR 路徑不符）"
+for f in schema_real.sql data.sql row_counts_exact.tsv; do
+  [ -s "$OUT/$f" ] || fail "$OUT/$f 不存在或為空（C 段未完成）"
+done
+
+echo "✅ PREFLIGHT PASS（repo=${origin}, OUT=${OUT}）"
+# 註：不自己 merge（gh pr merge / merge API 禁用）是行為規則，見 AFTER-G0 guardrail。

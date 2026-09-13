@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────
+# G0 一鍵匯出（{{APP_NAME}}）。一支腳本把 Supabase 的 schema / 清單 / 資料 / 排程全撈成檔案。
+# 設計給「聊天版 Claude Code + 少碰 terminal」：Cathy 只要填 .env、跑這一支，其餘自動。
+#
+# 用法（在 Cathy 自己 Mac）：
+#   1. cp .env.example .env
+#   2. 編輯 .env 填 PGHOST / PGUSER / DB_PASSWORD（見 .env.example；Dashboard→Database→Connection parameters）
+#   3. ./g0-export.sh
+#
+# 需要：psql、pg_dump（沒有的話 brew install libpq；本腳本會自動把 libpq 加進 PATH）。
+# 連線用分開的 PG* 欄位 + PGPASSFILE：密碼不進 process argv/env、也不進 shell history。
+# 產物全部落 ./supabase-export/。09_data.sql 含個資→留本機、走安全通道交 RD、不進 git（.gitignore 已擋）。
+# ─────────────────────────────────────────────────────────────
+set -euo pipefail
+cd "$(dirname "$0")"
+
+OUT="supabase-export"
+mkdir -p "$OUT" "$OUT/edge-functions"
+
+if [ ! -f .env ]; then
+  echo "❌ 缺 .env。請先： cp .env.example .env  然後填 PGHOST / PGUSER / DB_PASSWORD" >&2
+  exit 1
+fi
+chmod 600 .env 2>/dev/null || true
+
+# 安全讀 .env（不 source；去 CR、去頭尾空白、剝外層引號；缺 key 回空不觸發 pipefail）
+_read_env() {
+  { grep -E "^[[:space:]]*$1[[:space:]]*=" .env || true; } | tail -1 | tr -d '\r' \
+    | sed -E "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//; s/[[:space:]]+\$//; s/^'(.*)'\$/\1/; s/^\"(.*)\"\$/\1/"
+}
+PGHOST_V="$(_read_env PGHOST)"; PGPORT_V="$(_read_env PGPORT)"
+PGDATABASE_V="$(_read_env PGDATABASE)"; PGUSER_V="$(_read_env PGUSER)"
+DB_PASSWORD="$(_read_env DB_PASSWORD)"
+PGPORT_V="${PGPORT_V:-5432}"; PGDATABASE_V="${PGDATABASE_V:-postgres}"
+for pair in "PGHOST=$PGHOST_V" "PGUSER=$PGUSER_V" "DB_PASSWORD=$DB_PASSWORD"; do
+  [ -n "${pair#*=}" ] || { echo "❌ .env 缺 ${pair%%=*}（見 .env.example）" >&2; exit 1; }
+done
+case "$DB_PASSWORD" in
+  *"[YOUR-PASSWORD]"*|*"YOUR-PASSWORD"*|*"YOUR_PASSWORD"*)
+    echo "❌ DB_PASSWORD 還是佔位值，請換成真實密碼" >&2; exit 1 ;;
+esac
+case "$PGPORT_V" in
+  6543) echo "❌ Port 6543 是 Transaction pooler，pg_dump 會噴錯。請用 Session pooler / Direct 的 5432" >&2; exit 1 ;;
+esac
+
+# libpq keg-only：brew install libpq 不會 link 進 PATH，自動補上
+for d in /opt/homebrew/opt/libpq/bin /usr/local/opt/libpq/bin; do
+  if [ -d "$d" ]; then case ":$PATH:" in *":$d:"*) : ;; *) PATH="$d:$PATH" ;; esac; fi
+done
+export PATH
+for bin in psql pg_dump; do
+  command -v "$bin" >/dev/null 2>&1 || { echo "❌ 找不到 ${bin}（macOS：brew install libpq）。裝好再跑一次。" >&2; exit 1; }
+done
+
+# ── PGPASSFILE：密碼寫進 chmod 600 檔（跳脫 : 與 \），中斷也刪；密碼不進 argv/env/history ──
+_esc(){ printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/:/\\:/g'; }
+PGPASSFILE="$OUT/.pgpass"
+_cleanup(){ rm -f "$PGPASSFILE" "$OUT"/*.tmp; }
+trap _cleanup EXIT
+trap '_cleanup; exit 130' INT TERM HUP
+( umask 077; printf '%s:%s:*:%s:%s\n' "$(_esc "$PGHOST_V")" "$PGPORT_V" "$(_esc "$PGUSER_V")" "$(_esc "$DB_PASSWORD")" > "$PGPASSFILE" )
+chmod 600 "$PGPASSFILE"
+unset PGPASSWORD 2>/dev/null || true
+# connect_timeout：連不到 DB 時每支指令 10 秒內就報錯，不會逐一卡在 TCP connect 像凍住
+export PGPASSFILE PGCONNECT_TIMEOUT=10 PGHOST="$PGHOST_V" PGPORT="$PGPORT_V" PGDATABASE="$PGDATABASE_V" PGUSER="$PGUSER_V"
+
+LOG="$OUT/export-log.md"
+: > "$LOG"
+_log(){ echo "- $*" >> "$LOG"; echo "$*"; }
+_log "G0 匯出開始（$(date -u +%FT%TZ)）；專案由 .env 指定，scope = public schema"
+
+# 連線預檢：連不到就「立刻」明確報錯 + 引導備援，別讓後面每支指令各卡 10 秒
+if ! psql -X -q -c 'select 1' >/dev/null 2>"$OUT/_conn.err"; then
+  echo "❌ 連不到 DB（10s 逾時）。看 $OUT/_conn.err；常見原因：.env 連線參數錯、Port 沒用 5432、網路/沙盒連不到。" >&2
+  echo "   → 檢查 .env，或走備援：SQL 各項貼 Supabase SQL Editor、pg_dump 兩項請 RD 代跑。" >&2
+  exit 1
+fi
+_log "✅ 連線預檢通過（select 1）"
+
+# 每支 SQL → 檔；失敗記 log 不中止（-v ON_ERROR_STOP=1 讓單支查詢的錯明確）
+_psql_to(){ # $1=輸出檔 $2=說明 $3=SQL
+  rm -f "$OUT/$1"   # 先刪上一輪舊檔：本輪查詢失敗時不會留舊檔被誤判成功（COMPLETE 檢查靠檔案存在）
+  if psql -X -q -A -t -F $'\t' -v ON_ERROR_STOP=1 -c "$3" > "$OUT/$1.tmp" 2> "$OUT/$1.err"; then
+    mv "$OUT/$1.tmp" "$OUT/$1"; _log "✅ $2 → $1"
+  else
+    rm -f "$OUT/$1.tmp"; _log "❌ $2 失敗 → 看 $1.err（可能權限不足；空結果≠沒有，標『待 RD 確認』）"
+  fi
+}
+
+# ── 1. schema（含 table/function/RLS/trigger/view）── 一定 -n public，避開 vault/auth/pgsodium 權限與憑證
+rm -f "$OUT/01_schema.sql"
+if pg_dump --schema-only --no-owner --no-privileges -n public > "$OUT/01_schema.sql.tmp" 2> "$OUT/01_schema.err" \
+   && [ -s "$OUT/01_schema.sql.tmp" ]; then
+  mv "$OUT/01_schema.sql.tmp" "$OUT/01_schema.sql"; _log "✅ schema dump → 01_schema.sql"
+else
+  rm -f "$OUT/01_schema.sql.tmp"; _log "❌ schema dump 失敗或空檔 → 看 01_schema.err（版本 mismatch 就升級 pg_dump 或交 RD 代跑）"
+fi
+
+# 🔒 schema function body 可能硬編碼憑證（pg_net 打 Slack 等）；掃一次，命中要遮 placeholder 再交付
+if [ -f "$OUT/01_schema.sql" ] && grep -InE 'hooks\.slack\.com/services|Authorization[[:space:]]*:|Bearer |api[_-]?key|service_role|eyJ[A-Za-z0-9_-]{20,}' "$OUT/01_schema.sql" >/dev/null; then
+  _log "⚠️ 01_schema.sql 疑似含憑證（function body）→ 交付前把值遮成 placeholder、真值另交 RD 走安全通道"
+else
+  _log "✅ 01_schema.sql 未掃到明顯憑證（或檔案不存在）"
+fi
+
+# ── 2/3/4：清單類（純結構，無個資）──
+_psql_to 02_function_list.txt "function 清單" \
+  "select routine_name from information_schema.routines where routine_schema='public' and routine_type='FUNCTION' order by routine_name;"
+_psql_to 03_rls_policies.txt "RLS policies" \
+  "select schemaname, tablename, policyname, cmd, qual, with_check from pg_policies where schemaname='public' order by tablename, policyname;"
+_psql_to 04_realtime_tables.txt "Realtime 發佈表" \
+  "select schemaname, tablename from pg_publication_tables where pubname='supabase_realtime' order by tablename;"
+
+# ── 8a. row counts（估算，純數字）──
+_psql_to 08_row_counts.txt "各表 row counts（估算）" \
+  "select relname, n_live_tup from pg_stat_user_tables where schemaname='public' order by n_live_tup desc;"
+
+# ── 8b. 資料 dump（含個資，留本機）── 一定 -n public；非空才算成功
+rm -f "$OUT/09_data.sql"
+if pg_dump --data-only --no-owner --no-privileges -n public > "$OUT/09_data.sql.tmp" 2> "$OUT/09_data.err" \
+   && [ -s "$OUT/09_data.sql.tmp" ]; then
+  mv "$OUT/09_data.sql.tmp" "$OUT/09_data.sql"; _log "✅ data dump → 09_data.sql（含個資，留本機、走安全通道交 RD）"
+else
+  rm -f "$OUT/09_data.sql.tmp"
+  _log "❌ data dump 失敗或空檔 → 看 09_data.err（若 RLS aborting：換有 BYPASSRLS 的角色或交 RD 代跑；別加 --enable-row-security 硬跑，那會 dump 不完整）"
+fi
+
+# ── 9. 會自動發通知的 function / trigger（trigger 帶 action_statement 看實際呼叫哪支）──
+_psql_to 10_notification_triggers.txt "通知 function + trigger" \
+  "select 'FUNC' as kind, routine_name as name, null as tbl, null as action from information_schema.routines where routine_schema='public' and routine_definition ilike '%{{NOTIFY_LOG_TABLE}}%' union all select 'TRIG', trigger_name, event_object_table, action_statement from information_schema.triggers where trigger_schema='public' order by 1,2;"
+
+# ── 10. 排程（只 schedule，不取 command：command 常內嵌 service_role key）──
+_psql_to 11_schedules.txt "pg_cron 排程（不含 command，避免撈到金鑰）" \
+  "select jobid, schedule, active from cron.job order by jobid;"
+[ -f "$OUT/11_schedules.txt" ] || _log "ℹ️ 11_schedules 沒撈到（沒裝 pg_cron 或無權）→ 去 Dashboard→Edge Functions→每支 Schedules 抄頻率"
+
+# ── 5. Edge Functions 原始碼（需 supabase CLI 已 login+link；沒有就走 Dashboard）──
+PROJECT_REF="{{PROJECT_REF}}"
+if command -v supabase >/dev/null 2>&1; then
+  supabase link --project-ref "$PROJECT_REF" >/dev/null 2>&1 || _log "ℹ️ supabase link 失敗（需先 supabase login）；edge functions 改走 Dashboard"
+  if supabase functions list > "$OUT/_functions_list.txt" 2>/dev/null; then
+    _log "✅ functions list → _functions_list.txt（以這份真名為準）"
+    for fn in {{EDGE_FN_NAMES}}; do   # {{FILL: 這案預期的 edge function 名，空白分隔；以 list 真名為準，數量不符照實改}}
+      supabase functions download "$fn" >/dev/null 2>&1 || _log "❌ download $fn 失敗 → 這支重下或走 Dashboard"
+    done
+    [ -d supabase/functions ] && mv supabase/functions/* "$OUT/edge-functions/" 2>/dev/null || true
+    # 🔒 掃 edge function 原始碼硬編碼憑證
+    if grep -rInE 'hooks\.slack\.com/services|Authorization[[:space:]]*:|Bearer |api[_-]?key|service_role|eyJ[A-Za-z0-9_-]{20,}' "$OUT/edge-functions" >/dev/null 2>&1; then
+      _log "⚠️ edge-functions 疑似含憑證 → 交付前遮成 placeholder、真值另交 RD"
+    fi
+    _log "落地 edge functions：$(ls -1 "$OUT/edge-functions" 2>/dev/null | tr '\n' ' ')（逐名對 _functions_list.txt，少一支就是漏）"
+    _landed="$(ls -1 "$OUT/edge-functions" 2>/dev/null | grep -c . || true)"
+    if [ "${_landed:-0}" -lt {{EDGE_FN_COUNT}} ]; then
+      _log "❌ edge functions 只落地 ${_landed:-0} 支（預期至少 {{EDGE_FN_COUNT}}）→ 缺的重下或走 Dashboard，別當完成"
+    fi
+  else
+    _log "ℹ️ functions list 失敗 → 6 支 edge functions 改走 Dashboard 逐支複製到 $OUT/edge-functions/<name>/"
+  fi
+else
+  _log "ℹ️ 沒有 supabase CLI → 6 支 edge functions 走 Dashboard 逐支複製到 $OUT/edge-functions/<name>/（或 npm i -g supabase 後重跑）"
+fi
+
+# ── 完整性對數：09_data 各表列數 vs 08_row_counts（差很多＝被 RLS 濾掉，要換角色重跑）──
+if [ -f "$OUT/09_data.sql" ] && [ -f "$OUT/08_row_counts.txt" ]; then
+  _log "🔎 完整性：請對照 08_row_counts.txt 與 09_data.sql 的 COPY/INSERT 列數；差很多代表 dump 不全"
+fi
+
+# ── 關鍵產物齊全才算完成：任一缺失就不寫 COMPLETE、exit≠0（避免 dump 失敗被誤判成功）──
+# 關鍵＝兩支 dump + function 清單 + row counts（cron/realtime/edge 可能合法為空或走 Dashboard，不列關鍵）
+rm -f "$OUT/COLLECTION.COMPLETE"
+_crit_ok=1
+for f in 01_schema.sql 09_data.sql 02_function_list.txt 08_row_counts.txt; do
+  [ -f "$OUT/$f" ] || { _log "❌ 關鍵產物缺失：${f}（該步驟失敗，看對應 .err）"; _crit_ok=0; }
+done
+_log "G0 匯出結束（$(date -u +%FT%TZ)）"
+
+if [ "$_crit_ok" != 1 ]; then
+  echo
+  echo "❌ G0 未完成：關鍵產物缺失，未建立 COLLECTION.COMPLETE。看 ./$OUT/export-log.md 的 ❌ 與對應 .err；" >&2
+  echo "   多半是連不到 DB / 權限 / 工具沒裝。修好重跑，或走 SQL Editor / RD 代跑備援。" >&2
+  exit 1
+fi
+
+date -u +"%Y-%m-%dT%H:%M:%SZ" > "$OUT/COLLECTION.COMPLETE"
+# 用 || true（不追加 stdout）：BSD grep 零命中會印 0 並 exit 1，用 || echo 0 會變成 "0\n0" 讓下面 [ -gt ] 噴錯
+_warn_n="$(grep -c '❌\|⚠️' "$LOG" 2>/dev/null || true)"; _warn_n="${_warn_n:-0}"
+echo
+if [ "${_warn_n:-0}" -gt 0 ]; then
+  echo "✅ G0 關鍵產物齊全，但 export-log.md 有 ${_warn_n} 項 ❌/⚠️ 待處理（多半是 cron/realtime/edge 或憑證掃描）——請逐項看過、補齊或標『待 RD 確認』。"
+else
+  echo "✅ G0 匯出完成。產物在 ./$OUT/（09_data.sql 含個資、走安全通道交 RD、不進 git）"
+fi
+echo "──── 還要人工在 Dashboard 補的（腳本撈不到）────"
+echo "  • 06_auth_settings.md：Authentication→Providers/Settings（登入方式、@kkday.com 網域限制）截圖/記錄"
+echo "  • 07_storage.md：Storage→bucket 清單與政策（很可能『無』，也要寫『無』）"
+echo "  • 05_edge_functions_summary.md：每支 function 的『外部 API 網址(query key 遮 <REDACTED>)/頻率/Slack 頻道名』"
+echo "  • edge-functions/：若上面走 Dashboard，把 6 支原始碼複製進來"
+echo "──── 交付邊界 ────"
+echo "  • 技術定義（schema/清單/policy/edge code）可交 RD 入 repo；09_data.sql 走安全通道、不進 git"
+echo "  • 全部看一遍 export-log.md 的 ❌/⚠️/待確認，補齊或標『待 RD 確認』"
+echo "下一步：用 docs/g0-report-template.html 產 g0-report.html（去個資）交 Cathy 轉 Lance。"

@@ -1,0 +1,11 @@
+{
+  "name": "kkday-vibe",
+  "owner": { "name": "lance.chien" },
+  "plugins": [
+    {
+      "name": "vibe-governance",
+      "source": "./plugin",
+      "description": "kkday vibe coding 治理:規範注入 + 起手 scaffolder + 收工 guard + 遷移 skills"
+    }
+  ]
+}

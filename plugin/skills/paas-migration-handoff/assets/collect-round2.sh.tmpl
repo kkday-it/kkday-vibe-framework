@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────
+# Round 2 本機採集：真 pg_dump（public schema 的 schema + data）+ 精確 row counts。
+# 全部產物留本機、不外傳、不進版控。只把「聚合筆數」印到畫面（可放報告）。
+#
+# 用法（在 PM 自己 Mac 上）：
+#   1. cp .env.example .env
+#   2. 編輯 .env，填 PGHOST/PGUSER/DB_PASSWORD（見 .env.example）
+#   3. ./collect-round2.sh
+#
+# 需要：psql、pg_dump（沒有的話：brew install libpq；本腳本會自動把 libpq 加進 PATH）
+# 連線用分開的 PG* 欄位 + PGPASSFILE：密碼不進 process argv/env、也不用 URI 編碼。
+# ─────────────────────────────────────────────────────────────
+set -euo pipefail
+cd "$(dirname "$0")"
+
+if [ ! -f .env ]; then
+  echo "❌ 缺 .env。請先： cp .env.example .env  然後填 PGHOST/PGUSER/DB_PASSWORD" >&2
+  exit 1
+fi
+chmod 600 .env 2>/dev/null || true
+
+# 安全讀取 .env（不 source；去 CR、去頭尾空白、剝外層引號；缺 key 回空不觸發 pipefail）
+# 順序：去前綴 → 去尾端空白 → 剝引號（尾端空白先清，避免「引號後有游離空白」剝不掉引號）
+_read_env() {  # $1 = key（容忍 = 兩側空白）
+  { grep -E "^[[:space:]]*$1[[:space:]]*=" .env || true; } | tail -1 | tr -d '\r' \
+    | sed -E "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//; s/[[:space:]]+\$//; s/^'(.*)'\$/\1/; s/^\"(.*)\"\$/\1/"
+}
+
+PGHOST_V="$(_read_env PGHOST)"; PGPORT_V="$(_read_env PGPORT)"
+PGDATABASE_V="$(_read_env PGDATABASE)"; PGUSER_V="$(_read_env PGUSER)"
+DB_PASSWORD="$(_read_env DB_PASSWORD)"; OUT_DIR_CFG="$(_read_env OUT_DIR)"
+PGPORT_V="${PGPORT_V:-5432}"; PGDATABASE_V="${PGDATABASE_V:-postgres}"
+
+for pair in "PGHOST=$PGHOST_V" "PGUSER=$PGUSER_V" "DB_PASSWORD=$DB_PASSWORD"; do
+  [ -n "${pair#*=}" ] || { echo "❌ .env 缺 ${pair%%=*}（見 .env.example）" >&2; exit 1; }
+done
+case "$DB_PASSWORD" in
+  *"[YOUR-PASSWORD]"*|*"YOUR-PASSWORD"*|*"YOUR_PASSWORD"*)
+    echo "❌ DB_PASSWORD 還是佔位值，請換成真實密碼" >&2; exit 1 ;;
+esac
+
+# libpq keg-only：brew install libpq 不會 link 進 PATH，自動補上
+for d in /opt/homebrew/opt/libpq/bin /usr/local/opt/libpq/bin; do
+  if [ -d "$d" ]; then case ":$PATH:" in *":$d:"*) : ;; *) PATH="$d:$PATH" ;; esac; fi
+done
+export PATH
+for bin in psql pg_dump; do
+  command -v "$bin" >/dev/null 2>&1 || { echo "❌ 找不到 ${bin}（macOS：brew install libpq）" >&2; exit 1; }
+done
+
+# ── 產物資料夾：本機絕對路徑、非雲端同步夾、上層非 git repo（避免個資外傳/被 commit）──
+OUT="${OUT_DIR_CFG:-$HOME/{{APP}}-migration-local}"
+OUT="${OUT/#\~/$HOME}"
+case "$OUT" in /*) : ;; *) echo "❌ OUT_DIR 必須是絕對路徑：$OUT" >&2; exit 1 ;; esac
+case "$OUT" in "$HOME"|"$HOME/") echo "❌ OUT_DIR 不要設成家目錄本身，請用專用子目錄（如預設 ~/{{APP}}-migration-local）" >&2; exit 1 ;; esac
+case "$OUT" in *"/../"*|*"/..") echo "❌ OUT_DIR 不要含 .. 路徑段（會繞過同步夾防線），請給乾淨的絕對路徑：$OUT" >&2; exit 1 ;; esac
+# 解實體路徑（打穿 iCloud「桌面與文件」等 symlink）後再比對
+_anc="$OUT"; while [ ! -d "$_anc" ]; do _anc="$(dirname "$_anc")"; [ "$_anc" = "/" ] && break; done
+_anc_rp="$(cd "$_anc" 2>/dev/null && pwd -P || echo "$_anc")"
+_leaf="${OUT#"$_anc"}"; OUT_RP="${_anc_rp%/}${_leaf:+/${_leaf#/}}"
+for p in "$OUT" "$OUT_RP"; do
+  case "$p" in
+    *"Library/Mobile Documents"*|*"Library/CloudStorage"*|*iCloud*|*Dropbox*|*"/Google Drive"*|*GoogleDrive-*|*OneDrive*)
+      echo "❌ OUT_DIR 落在雲端同步夾（含個資會被同步上雲）：$p" >&2; exit 1 ;;
+    "$HOME/Documents"|"$HOME/Documents/"*|"$HOME/Desktop"|"$HOME/Desktop/"*)
+      echo "❌ OUT_DIR 不要放 Documents/Desktop（開了 iCloud 桌面與文件會同步上雲）：$p" >&2; exit 1 ;;
+  esac
+done
+if git -C "$_anc_rp" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "❌ OUT_DIR 的上層在一個 git repo 內（個資可能被 commit）：$OUT" >&2
+  echo "   若你家目錄本身是 git repo（dotfiles/yadm），請在 .env 設 OUT_DIR 到一個不在 repo 內的絕對路徑。" >&2
+  exit 1
+fi
+mkdir -p "$OUT"; chmod 700 "$OUT"
+[ -f "$OUT/.gitignore" ] || printf '*\n' > "$OUT/.gitignore"
+# 只清完成標記與舊 .pgpass（FINAL 檔靠 .tmp→mv 覆蓋；失敗時保留上一輪 good copy）
+rm -f "$OUT/COLLECTION.COMPLETE" "$OUT/.pgpass"
+
+# ── PGPASSFILE：密碼寫進 chmod 600 檔（pgpass 需跳脫 : 與 \），中斷也刪；密碼不進 argv/env ──
+_esc(){ printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/:/\\:/g'; }
+PGPASSFILE="$OUT/.pgpass"
+# 先裝 trap 再建檔（避免建檔後、裝 trap 前收到中斷，明文密碼檔殘留）；rm -f 對不存在的檔也安全
+_cleanup(){ rm -f "$PGPASSFILE" "$OUT/schema_real.sql.tmp" "$OUT/data.sql.tmp" "$OUT/row_counts_exact.tsv.tmp"; }
+trap _cleanup EXIT
+trap '_cleanup; exit 130' INT TERM HUP
+( umask 077; printf '%s:%s:*:%s:%s\n' "$(_esc "$PGHOST_V")" "$PGPORT_V" "$(_esc "$PGUSER_V")" "$(_esc "$DB_PASSWORD")" > "$PGPASSFILE" )
+chmod 600 "$PGPASSFILE"
+unset PGPASSWORD 2>/dev/null || true          # PGPASSWORD 優先序高於 PGPASSFILE，清掉繼承值
+export PGPASSFILE PGHOST="$PGHOST_V" PGPORT="$PGPORT_V" PGDATABASE="$PGDATABASE_V" PGUSER="$PGUSER_V"
+
+echo "⚠️ 注意：schema / data / 筆數是連續三次擷取（各自快照），非單一交易的一致快照。"
+echo "   僅供功能 UAT + 概量；cutover 對數以日後 G1 的 fresh sync 為準。建議低流量時段跑。"
+echo
+
+# 只取 public schema（Supabase 的 postgres 角色非 superuser，dump 全庫會在 vault/pgsodium 權限爆掉）
+echo "[1/3] pg_dump schema（public）..."
+pg_dump --schema-only -n public --no-owner --no-privileges > "$OUT/schema_real.sql.tmp"
+echo "[2/3] pg_dump data（public，含個資，留本機）..."
+pg_dump --data-only -n public --no-owner > "$OUT/data.sql.tmp"
+echo "[3/3] 精確 row counts（單一 REPEATABLE READ 交易；format('%I') 安全引用）..."
+psql -X -q -A -t -F $'\t' -v ON_ERROR_STOP=1 > "$OUT/row_counts_exact.tsv.tmp" <<'SQL'
+BEGIN ISOLATION LEVEL REPEATABLE READ;
+SELECT format('SELECT %L, count(*) FROM %I.%I', tablename, schemaname, tablename)
+FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename
+\gexec
+COMMIT;
+SQL
+
+mv "$OUT/schema_real.sql.tmp"      "$OUT/schema_real.sql"
+mv "$OUT/data.sql.tmp"             "$OUT/data.sql"
+mv "$OUT/row_counts_exact.tsv.tmp" "$OUT/row_counts_exact.tsv"
+date -u +"%Y-%m-%dT%H:%M:%SZ" > "$OUT/COLLECTION.COMPLETE"
+
+rm -f "$PGPASSFILE"   # 提早刪密碼檔（EXIT trap 仍是異常退出的保險）；讓下面產物清單不再出現 .pgpass
+echo
+echo "✅ 完成（已建立 COLLECTION.COMPLETE）。產物留本機 ${OUT}（chmod 700、gitignore、不外傳）："
+ls -la "$OUT" | awk '{print "   "$5"\t"$NF}'
+echo
+echo "──── 可放進 g0-report 的聚合筆數（純數字、無個資；scope = public schema）────"
+cat "$OUT/row_counts_exact.tsv"
+echo "─────────────────────────────────────────────────────"
+echo "🔒 schema_real.sql / data.sql 留在 ${OUT}，不要傳出、不要進 git、不要貼雲端。"

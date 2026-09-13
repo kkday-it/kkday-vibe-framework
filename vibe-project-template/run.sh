@@ -4,7 +4,16 @@
 set -euo pipefail
 
 TASK="${1:-}"
-[ -n "$TASK" ] || { echo "usage: ./run.sh <task> [args...]"; echo "tasks: web | worker | run <workflow-id> [--run-id r-x] [--input k=v ...] [--yes] | migrate | <自訂 task>"; exit 2; }
+if [ -z "$TASK" ]; then
+  # cloud-ready spec §1.4:不帶參數 → 印出可跑的工作清單(這是 B 型的「說明書」),不要報錯
+  echo "可跑的 task:"
+  echo "  web                                          啟動 API server(gunicorn,綁 0.0.0.0:\$PORT)"
+  echo "  run <workflow-id> [--run-id r-x] [--input k=v ...] [--yes]   跑單一 workflow"
+  echo "  migrate                                      DB migration runner"
+  echo "  worker                                       [legacy] 派工器佔位"
+  echo "  (自訂 task 加在 run.sh 的 case 裡,並補進這份清單)"
+  exit 0
+fi
 shift || true
 
 case "$TASK" in

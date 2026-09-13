@@ -1,0 +1,6 @@
+{
+  "name": "vibe-governance",
+  "version": "0.1.0",
+  "author": { "name": "lance.chien", "email": "lance.chien@kkday.com" },
+  "description": "kkday vibe coding 治理:公司規範自動在場(SessionStart 注入)+ vibe-start 起手合規骨架 + 收工 guard 安全網(Stop hook)+ 遷移三件組(cloud-ready-review / supabase-inventory / paas-migration-handoff)。權威規範:vibe-cloud-ready-spec-0913.md。"
+}

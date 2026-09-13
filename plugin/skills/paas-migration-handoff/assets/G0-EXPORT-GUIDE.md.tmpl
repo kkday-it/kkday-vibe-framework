@@ -1,0 +1,52 @@
+# G0：{{PaaS}} 匯出指南（{{PM 名}} 的主要任務）— {{系統名}}
+
+> **你的角色**：把 {{PaaS}} 專案裡的東西**完整匯出**成檔案，交給 RD。
+> **為什麼最急**：下一步「照規範重構」**完全卡在這份匯出**——RD 要先看懂 {{PaaS}} 做了哪些事才能重建。
+> **怎麼做**：把這份交給你電腦上的 Claude，叫它「照 G0-EXPORT-GUIDE 幫我一步步匯出」。你只提供存取權。
+> **這案最容易漏的**：{{案件重點，如 N 支背景服務——邏輯/外部 API 網址/頻率/發送目標都不在程式碼 repo，只活在 {{PaaS}} 上，漏一支重構就少一塊安靜出錯}}。
+
+## 你要先準備的存取權
+{{已知前置，如 project ref}}
+1. **DB 連線字串**：Dashboard → Project Settings → Database → Connection string。
+   > 🟢 白話：模式選「Session」那個；不確定就把整串貼給你的 Claude 檢查。
+   > ⚠️ 給 AI：選 **Session pooler / Direct（Port 5432）**，**不要 Transaction pooler（6543）**——後者 `pg_dump` 噴錯。
+   > 🆘 若 `command not found: pg_dump`：你電腦沒裝很正常、不代表做錯。這幾項可請 RD 代跑——**連線字串走安全管道給（當面/私訊，別貼公開頻道）**。
+2. **Dashboard 登入**：{{背景服務原始碼、Auth 設定、Storage、排程頻率}} 要從畫面拿。
+3.（選）**{{PaaS}} CLI** 已登入：加速批次下載。（給你的 Claude 的加速選項，PM 本人不用理解、沒有也沒關係。）
+
+> 🔒 匯出物**含個資**（{{哪張表}}）——存本機、交 RD，**不要上傳公開的地方**。
+
+## 主路徑：跑 `supabase-inventory` skill 自動盤點
+能跑 skill 就別手動。它只讀、fail-closed，一鍵產附來源的 `manifest.json`，涵蓋 schema/function/RLS/trigger/view/realtime/edge functions/auth/storage/row counts/排程，還做 code-scan 交叉檢查。憑證全程留在 PM 機器。跑不動再走下面手動 Dashboard 路徑。
+
+## 手動路徑（備援）— 每項標了誰做
+> **【AI 自動跑】**＝你的 Claude 自己跑，PM 不用動、不用看懂 SQL。**【需 {{PM}} 點畫面】**＝要你本人到 Dashboard 點/截圖。
+
+{{逐項列匯出清單，每項標【AI 自動跑】/【需 PM 點畫面】：完整 schema、function 清單、RLS、realtime、背景服務原始碼（+每支的外部 API 網址/頻率/發送目標）、auth 設定、storage、row counts+資料 dump（含個資不進版控）、通知觸發、排程頻率}}
+
+> 🔴 **手動 Dashboard 路徑最容易漏這幾樣（實案踩過，`pg_dump` 本來會抓、手動重建會漏）——一定要單獨撈：**
+> - **enum 自訂型別**、**sequence**：漏了還原時欄位 `DEFAULT nextval(...)` 找不到、整批表建不起來（實案第 1~2 輪只建出 7/50、14/50 張表就是漏這兩樣）。
+> - **pg_cron 排程**（`select * from cron.job`）：DB 內的定時業務邏輯，`pg_dump --schema-only` 不含，遷移必手動重建，漏了就「安靜不跑」。
+> - **外部排程 / CI（PaaS 之外）**：算力常不在 PaaS 裡——去看 repo 的 `.github/workflows/`、其他 CI、外部 cron 有沒有在打這個 DB / 跑引擎。只盤 PaaS 會整塊漏掉。
+>
+> 🔴 **別預設「某個 function/edge 不存在、不用找」。** 一律先 `supabase functions list` + 列真實 function 清單，再比對評估文件——實案就撞到「文件說只有 1 支 edge、別找 approve_xxx」，實際有 2 支、approve 那支還活著。以實際列出的為準。
+
+## 交出去前，自己驗一下（這段給你的 Claude / RD，**PM 本人不用跑、不用看懂**）
+> 🟢 給 {{PM}}：這是技術檢查，你的 Claude 會做。看到紅字錯誤不用緊張，常是缺 {{PaaS}} 專屬相依，不代表匯出錯；整包交 RD 判斷。
+{{驗證項：schema 空庫重跑、function 對照、背景服務數量齊、待確認清單}}
+
+## 交件邊界
+- **交給誰**：RD（{{主導者}} 指定接收人）。
+- **交什麼**：匯出整包。**含個資的資料 dump 走安全通道、不進 repo**；技術定義可入 repo。
+- **留 log**：`export-log.md`——日期、專案 ref、每項成功/失敗/不存在、失敗原始錯誤。不要只留結論。
+- **G0 完成後接著做兩件事**（見文末「收尾」）。
+
+## 收尾（G0 撈完一定要做）
+### 一、產 `g0-report.html`（交 {{PM}} 轉給 {{主導者}}）
+用 `docs/g0-report-template.html`，把撈到的填進去、另存 `g0-report.html`：
+- 只填**狀態 + 結構摘要 + 數字**。🔒 **禁**貼資料列、個資、連線字串、token、webhook URL、API key——違反就不能轉傳。
+- 「預期」欄已預填（來自評估文件），你只填「實際」欄與燈號；對不上標差異。
+- 填不出來標「⏳ 待確認」，不要留空、不要瞎猜——**這些就是還要補的資訊**。
+
+### 二、起手重構準備（照 `docs/{{cloud-ready-spec}}.md`）
+規則見 `CLAUDE.md`「## G0 之後」。**第一關（本機化）不需等任何人立刻開始**；碰 {{PaaS}} 邏輯的用剛出土的料照既定決策做。🔴 形狀鐵則：不拆前後端、不用 FastAPI、一個 docker-compose。

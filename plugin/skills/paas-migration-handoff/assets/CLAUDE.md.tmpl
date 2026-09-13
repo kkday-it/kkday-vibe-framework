@@ -1,0 +1,68 @@
+# CLAUDE.md — {{repo-name}} 上雲交接包
+
+給在此資料夾工作的 AI agent 的規則。使用者是 **PM {{PM 名}}**（非工程背景）——白話、少術語、先講結論。一律**繁體中文**（程式碼/識別字/路徑/指令維持原文）。
+
+## 整體流程
+
+沿用 5 步流程：**① G0 {{PaaS}} dump（盡快·PM）→ ② 照 `docs/{{cloud-ready-spec}}.md` 重構（去 {{PaaS}}）→ ③ 本機 compose 能動 → ④ 灌 sample data → ⑤ UAT（本機、安全）。** ② 重構卡在 ① dump。**現行線上系統全程不動。**
+
+**你（PM 的 AI）在這個 session 依序做兩件事：**
+1. **G0 匯出 + 填「缺口報告」**：照 `G0-EXPORT-GUIDE.md` 撈料（可跑 `supabase-inventory` skill），把結果填進 `docs/g0-report-template.html`（產出 `g0-report.html`）。**這份報告每個 `{{}}` 佔位與「待確認」清單，就是你還需要補足的資訊**——填不出來標「待 RD 確認」，不要留空、不要瞎猜。
+2. **起手重構準備**：G0 撈完就照下面「## G0 之後」，按 `docs/{{cloud-ready-spec}}.md`（公司 DevOps 規範）開始。**第一關（本機化）不需等任何人，可立刻開始。**
+
+⑤ UAT 由 PM 本人驗收；重構重活與平台介接需與 RD / 主導者協調。
+
+## 起跑
+
+1. 先讀本檔 + `START-HERE.md`。
+2. PM 的主線＝照 `G0-EXPORT-GUIDE.md` 執行。
+3. 你需要能：讀本資料夾、跑終端指令、開瀏覽器操作 {{PaaS}} Dashboard。**環境不能跑指令/連 DB**，就把指南轉成「請 PM 或 RD 執行」的清單，別假裝跑過。
+4. {{PaaS}} 存取由 **PM 提供**、**只在她機器上用、不外傳**；沒有先跟她要。{{已知的 project ref / 其他前置}}。
+
+## 這案的事實（實讀 repo 確認，非二手）
+
+- 前端耦合：{{直連 DB？有無自家 API 層？grep 到什麼}}
+- 認證：{{機制 + 綁哪個 PaaS}}
+- 授權：{{RLS / 應用層}}
+- 背景服務：{{幾支 function / trigger / cron，各做什麼、打哪些外部 host、頻率}}
+- 個資落點：{{哪張表；dump 不進版控}}
+
+## 重構（②）既定決策（勿再問，做法依 G0 定）
+
+- 去 {{PaaS}} Auth → **{{自管 OAuth / 公司 SSO}} + JWT**。**不走 FastAPI**；不拆前後端；一個 docker-compose。
+- 去 {{PaaS}} 直連 → 新後端開 data API，前端改打它。
+- 授權 RLS → **應用層授權**（用 G0 匯出的 RLS policy 當權威來源重寫）。
+- DB function / trigger → 出土後理想搬應用層；至少進版控。
+- 背景服務 → **B 型批次 CronJob**，打成一個 batch image 用 `args` 分派。{{若有 24/7 不可中斷需求：平台要保證不被夜間縮容}}。
+- Realtime（若有）→ 前端輪詢。
+- 資料層 → 本機 / 日後 RDS Postgres；schema 走 `db/migrations/` forward-only。
+
+## G0 之後：你要補足什麼 + 怎麼起手重構準備
+
+**權威規範＝`docs/{{cloud-ready-spec}}.md`。重構每個決定都要對得上它。**
+
+### A. 你要補足的資訊
+就是 `g0-report.html` 裡：每個 `{{}}` 佔位、「預期 vs 實際」對不上的地方、全部「待確認」。補齊或明確標「待 RD 確認」。
+
+### B. 重構準備怎麼起手（對照 spec 節次）
+**第一關（本機化，不需等 G0/平台，立刻開始）：** 本機起 Postgres（別 SQLite）；散落參數提到 `.env.example` 標分類；前端去 CDN 改本地打包；對外送出開關預設關、寫 compose 看得見處；缺 env 大聲失敗、容器非 root、只寫 `/tmp`；`.env.example` 守門測試。
+**碰 {{PaaS}} 邏輯的部分（需 G0 料，照既定決策做）：** schema→migrations baseline；Auth→OAuth+JWT；RLS→應用層；背景服務→CronJob；前端 `.from()`→打自家 API。
+
+> 🔴 形狀鐵則：**不拆前後端、不用 FastAPI、一個 docker-compose、image 能合就合**。逐塊對照見 `docs/solution-overview.md`。
+
+## 完成驗收（②③④ 做完、進 ⑤ 前逐項對過）
+1. 去 {{PaaS}} 盤點乾淨：每個輔助功能都有對應或明確記「不需要、原因…」。
+2. 背景服務邏輯重建：同輸入同輸出；idempotent 台帳邏輯不變。
+3. 關鍵表 row-count 對數一致（用 G0 基準）。
+4. 核心業務流程行為對數一致。
+5. 本機一鍵跑：`docker compose up` 起得來、灌 sample data 可跑 UAT。
+
+## 留痕紀律
+跑指令 `2>&1 | tee`；保留原始輸出與失敗 `.err`（空結果 ≠「沒有」）；每階段收尾記一筆。
+
+## 權威順序
+1. `START-HERE.md` + 本檔。2. `docs/{{cloud-ready-spec}}.md`（DevOps 規範硬約束）。3. `docs/solution-overview.md`。4. `docs/g0-report-template.html` + 前置 review。
+
+## 規矩
+- 文件自相矛盾，先講出來再改，別靜默繞過。
+- G0 匯出完 → 產 `g0-report.html` → 接著起手重構（第一關立刻開始）。重活與平台介接與 RD/主導者協調，**現行線上全程不碰**。
