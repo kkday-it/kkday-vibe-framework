@@ -1,6 +1,6 @@
 # 上雲環境約束（Cloud-Ready Spec）— 給 AI coding agent 的參考
 
-最後修訂：2026-09-08（修訂內容見文末「修訂紀錄」；檔名日期 = 最後修訂日）
+最後修訂：2026-09-13（修訂內容見文末「修訂紀錄」；檔名日期 = 最後修訂日）
 
 > **這份文件的用途**：在你開始寫任何 code 之前先讀完。你寫出來的專案最終會被容器化，部署到公司內部的
 > **AWS EKS（Kubernetes）** 上。以下是那個環境的硬條件。**只要一開始就照著做，上雲時幾乎不需要改動；
@@ -364,7 +364,7 @@ PostgreSQL**，檔案放 **S3**，排程用 **Kubernetes CronJob**，環境變�
 | 3 | 完全無狀態：pod 隨時被殺、可能多份 | 2 | 登入掉、資料不一致、上傳檔消失 |
 | 4 | 不寫本機磁碟（除 `/tmp`）；檔案一律進物件儲存 | 1（不寫磁碟）／3（S3） | 重啟即失、多 pod 看不到彼此的檔 |
 | 5 | 不用 SQLite / 檔案型 DB / 檔案型佇列 | 1 | 無法水平擴充、資料遺失 |
-| 6 | DB = 外部 PostgreSQL，連線資訊來自 env；TLS 依平台指示（內網非硬性） | 3 | 連不上 |
+| 6 | DB = 外部 PostgreSQL，連線資訊來自 env；TLS 屬**平台決定項**（內網非硬性，開工前問平台，§4.5） | 3 | 連不上 |
 | 7 | schema 變更 = repo 內 forward-only SQL migration；**runtime 不做 DDL** | 2 | 上不了、權限被拒 |
 | 8 | 排程 = HTTP endpoint（A 型）或 CronJob 直接跑映像（B 型）；**都不是** in-process timer | 2 | 排程不會跑／重複跑 |
 | 9 | 雲端資源（S3 等）用 SDK **預設憑證鏈**，程式內零 key | 3 | 需要發 access key，安全審不過 |
@@ -458,7 +458,9 @@ PostgreSQL**，檔案放 **S3**，排程用 **Kubernetes CronJob**，環境變�
   **若有開 TLS**，做到「加密、不驗 CA」即可，但 **`sslmode` 的值依 driver 而異，抄錯直接連不上**：
   - libpq / psycopg（Python 等）：用 `sslmode=require`（這一系的 `require` 本來就不驗 CA；
     **`no-verify` 不是有效值**，有效值僅 disable/allow/prefer/require/verify-ca/verify-full）。
-  - Node `pg`：用 `sslmode=no-verify`（這一系的 `require` 會驗憑證而失敗）。
+  - Node `pg`：connection string 用 `sslmode=no-verify`（限支援該參數的 `pg` / `pg-connection-string`
+    版本；這一系的 `require` 會驗憑證而失敗）；若用 **config object** 則明確寫
+    `ssl: { rejectUnauthorized: false }`。一律以專案 lockfile 鎖定的 `pg` 版本**實測連線**後才算過。
   - （2026-09-08 修訂：原文寫「TLS 必開」且一律 `no-verify`——前者內網非硬性，後者在 libpq/psycopg 上無效。）
 - **連線池要小**（單 pod 個位數）。`pod 數 × pool 上限` 必須遠低於 RDS 的 max_connections。
 - app 的 DB 帳號**只有 CRUD 權限**。任何 `CREATE` / `ALTER` / `DROP` 都不能在 runtime 執行。
@@ -528,8 +530,9 @@ PostgreSQL**，檔案放 **S3**，排程用 **Kubernetes CronJob**，環境變�
 - 回傳／印出 JSON 摘要（處理數、失敗數）。
 - 把「需要哪些排程、多久一次、可接受的時段」寫在 README。
   **假設夜間與假日可能縮容 → 排程一律（盡量）排在上班時段內。**
-  - 例外：**依收件人時區發送**的通知類排程（使用者跨多時區）無法一刀切成單一上班時段——
-    這類需求要**開工前跟平台確認**夜間/假日縮容下的 CronJob 調度支援，不要自己假設夜間一定會跑。
+  - 例外（**fail-closed**）：**依收件人時區發送**的通知類排程（使用者跨多時區）無法一刀切成單一上班時段。
+    此例外**僅在平台團隊書面核准（記錄於 README 或 ticket）、且驗證過夜間/假日縮容下的 CronJob
+    調度支援後成立**；未取得核准前一律先照上班時段排，**不得自行宣告豁免**。
     另外「給主管看的單一播報」和「逐人通知」要分開判斷：前者通常可以移進上班時段，後者不行。
 - 時間：pod 預設 **UTC**。DB 存 UTC，任何跟「幾點」有關的商業邏輯都要**顯式帶時區**，
   不要依賴系統 local time —— 平台把 `TZ` 蓋掉你也不能算錯。
@@ -646,6 +649,7 @@ push 到 main
 □ 廠商 SDK 只出現在 adapter 檔案裡
 □ 對外呼叫的 host 清單、需要的排程時段、需要的 env，都寫進 README
 □ 空字串的 env 被當成「沒設」處理（config-manager 注入空值很常見）
+□ 已取得平台對 DB TLS 的明確決定；若要求 TLS，已用 lockfile 鎖定的 driver 版本實測加密連線設定（§4.5）
 ```
 
 ---
@@ -655,7 +659,8 @@ push 到 main
 1. **`.env.example`**：每個變數的用途 + 分類（build-time / runtime secret / runtime 非機密）+ 哪些是必填。
    **並標明哪幾區是這個服務真的需要的** —— 如果檔案裡混著別條線或已退役功能的變數，請講清楚，
    否則對方無從判斷要設哪些。
-2. **專案形狀**：A 型（web service）還是 B 型（批次作業）。這決定要不要 Service / Ingress / probe。
+2. **專案形狀**：**逐 workload** 列 A 型或 B 型（§1.1 混合形狀的 repo 要分別列出每個 workload 與其 image、
+   port／health endpoint 或 CronJob args）。這決定每個 workload 要不要 Service / Ingress / probe。
 3. **服務基本資料**（A 型）：容器 port、health endpoint 路徑、期望的網域名稱。
 4. **DB 需求**：是否需要 DB、需要哪些 extension、是否有既有資料要匯入（提供 dump + 驗證用的 row count）。
 5. **物件儲存需求**：需要幾個 bucket、大概用量、保存期限、寫入權限方式（IRSA 或 access key）。
@@ -674,6 +679,14 @@ push 到 main
 
 ## 修訂紀錄（Release Notes）
 
+### 2026-09-13（codex peer-review 修正，1 HIGH + 4 MED 全採納）
+
+- §4.5 **Node `pg` 指引補完**（HIGH）：限定 connection string `sslmode=no-verify` 適用版本；config object 寫法明確為 `ssl: { rejectUnauthorized: false }`；要求以 lockfile 鎖定版本實測連線。
+- 硬約束 #6：TLS 改標「**平台決定項**」，消除「硬約束表內卻非硬性」的語義矛盾；§7 自我檢查新增「已取得平台 TLS 決定、要求時已實測」一條。
+- §8 交平台資訊第 2 條：專案形狀改為**逐 workload 列**（對齊 §1.1 混合形狀）。
+- §4.7 排程例外改 **fail-closed**：僅在平台書面核准（README/ticket 留痕）並驗證縮容調度後成立，未核准不得自行宣告豁免。
+- 修訂紀錄補記 2026-09-08 的檔名制度變更（見下）。
+
 ### 2026-09-08
 
 **批次一：首個實案（排班系統上雲）review 回饋**
@@ -689,6 +702,10 @@ push 到 main
 - §4.5 與硬約束 #6：**TLS 由「必開」改為「內網非硬性、依平台指示」**；有開時 sslmode 規則同上。
 - §4.7：排程「一律」→「一律（**盡量**）」排上班時段。
 - §1.1／§4.10：**image 數量能合就合**——前後端沒必要不拆 container；合理拆分線是「常駐（A）vs 跑完就走（B）」，不是前後端邊界。
+
+**其他（檔名制度）**
+
+- 檔名改為含最後修訂日期的版本名（`vibe-cloud-ready-spec-<MMDD>.md`），頂部「最後修訂」行改為指向本修訂紀錄；日後每次修訂隨之改名並全庫更新引用。
 
 ### 2026-09-04
 

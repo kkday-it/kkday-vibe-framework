@@ -2,7 +2,7 @@
 
 本檔保存「重要但尚未實作」的能力。主 README、template 與 proposal 不把這些寫成已交付承諾；但它們仍是後續要追的設計事項。
 
-最高優先級仍是 `vibe-cloud-ready-spec-0908.md`。roadmap 項目若與 DevOps spec 衝突，必須改成 cloud-ready 版本後才能進主線。
+最高優先級仍是 `vibe-cloud-ready-spec-0913.md`。roadmap 項目若與 DevOps spec 衝突，必須改成 cloud-ready 版本後才能進主線。
 
 ## ⚠️ 開始 M1 前先確認:conformance-gate-spec.md 的 A/B 規則跟現有用法對不上
 
@@ -168,13 +168,13 @@ Cloud-ready 版方向：
 
 ## R11. 既有專案遷移套件（Migration Kit for Existing Projects）
 
-**狀態**：未實作。已有首個手工實例可作一般化來源（go_cathy 上雲遷移文件集，內部案例、不隨 repo 發布，僅作遷移參考）。
+**狀態**：**部分落地（2026-09-13 更新）**——已以三個 skill 形式實作核心流程：`cloud-ready-review`（對照 spec 的落差審查）、`supabase-inventory`（BaaS 黑盒盤點 = G0）、`paas-migration-handoff`（給 PM 的交接包生成）。首個實例 go_cathy 的 `handoff-to-cathy` 已入庫。仍待：文件模板集一般化收斂、「guard 綠 + 測試綠」機械判定遷移完成（依賴 R2）。
 
 **背景**：目前 framework 是 greenfield-first —— `vibe-project-template` + guard 讓**新**專案天生 cloud-ready。但公司內有大量**既有** Netlify/Supabase/PaaS 專案要上 EKS，framework **沒有系統化的「把舊 app 搬進來」流程**，只給了目標（`ctx.*`）與閘門（guard）。若每案重造流程，等於治理不了規模。
 
 **目標**：把一次性手工遷移產物一般化成可複用套件，讓第 2..N 個案子變「照模板填空、對同一份 spec/guard/ctx.*」。
 
-- **遷移文件模板集**（結構固定、內容留白）：gap-report（現況 vs `vibe-cloud-ready-spec-0908.md` 逐條落差）、target-architecture-design（目標 + 已定決策）、migration-plan（分階段 + 每階段完成條件/驗證/回滾）、HANDOFF（交接入口）、UAT-checklist（PM 驗收）。
+- **遷移文件模板集**（結構固定、內容留白）：gap-report（現況 vs `vibe-cloud-ready-spec-0913.md` 逐條落差）、target-architecture-design（目標 + 已定決策）、migration-plan（分階段 + 每階段完成條件/驗證/回滾）、HANDOFF（交接入口）、UAT-checklist（PM 驗收）。
 - **遷移 playbook**：四步驟 discovery→設計→plan→QA，對應本 framework 的 spec/guard/`ctx.*`；採 strangler + 兩道閘門模式：**G0 待盤點**（既有 BaaS 黑盒：schema/RPC/RLS/Realtime/Edge Function 匯出）、**G1 資料遷移與寫入切換**（初始匯入對帳、單一寫入源紀律、增量追平、回切演練）。
 - **對準目標**：批次半搬成 `workflows/<name>/flow.py` + `ctx.*` + manifest（framework 甜蜜區，依賴 R4 的 `ctx.db`）；web + 資料層半在 framework 具備 web 托管與 `ctx.db` 前，playbook 需標明「framework 尚未涵蓋、暫走自管」。
 
@@ -184,3 +184,17 @@ Cloud-ready 版方向：
 - 遷移「完成」由 **guard 綠 + 測試綠** 機械判定，取代人工逐案 review（依賴 R2 guard 完整化）。
 
 **依賴**：R2（Cloud-Ready Guard 完整化）、R4（`ctx.db` 實作）。
+
+## R12. Agent 執行期問責（Runtime Accountability）
+
+**狀態**：未實作，規劃期。來源：對照外部「AI agent 治理四條責任邊界」框架的 gap 分析（2026-09-03，詳見 iThome 文章 10401926）。
+
+**定位**：conformance-gate-spec 管的是「**寫出來的 code 合不合規**」（merge 前的靜態/測試閘門）；本項管「**跑起來之後出事，能不能問責、能不能停**」。五項缺口多屬 M3/平台期，先記下避免遺忘：
+
+1. **Agent 工作身分與委派鏈**（邊界二核心）：agent flow 以可識別、可撤銷、權限受限的工作身分執行；tool-call／run 紀錄可倒查「委派者、session、目的、碰過的資源、核准、結果」。現況：conformance-gate E3 run ledger 只有 run 級 `run_id/actor`，`actor` 語義未定義（委派的人？agent 身分？）。
+2. **撤權實測與故意失敗演練**（邊界二＋導入順序）：在 R9 kill switch 之上，要求「每升一級（green→yellow→red）先故意讓它失敗一次」：呼叫被禁 host 確認 C3 egress 真的擋、執行中撤 token 確認 session／快取憑證同步失效、工具回傳到一半中斷確認收斂不留殘骸。演練通過才准升級，寫進 onboarding gate。**沒演練過的煞車等於沒有煞車。**
+3. **驗收獨立性——fixture／測試不可與實作同 PR 自改**（邊界四）：agent 同一個 PR 改 flow 又改 `test_fixture`／`tests/`，會讓 B2/B4 驗證假性綠燈（自己出題自己改答案）。需 guard 檢查（同 PR 同時動 flow 與 fixture → 強制人工 review）或併入 R7 CODEOWNERS。
+4. **資料分類 taxonomy**（邊界一）：`touches.pii` 布林 → 分類欄位（客戶個資／原始碼／production log／內部文件…），逐類定「可經哪個入口、留什麼紀錄」；供應商條款面（retention／是否用於訓練／request log 查閱權）落成可勾稽 checklist。
+5. **run ↔ PR/commit 串接**（邊界二）：run ledger 記 image tag（= commit SHA）與來源 PR，出事能答「這筆寫入來自哪個 PR 部署的哪版 flow」，而不是 git 與執行紀錄兩個世界。
+
+**依賴**：R7（CODEOWNERS，項 3）、R9（kill switch，項 2）、conformance-gate-spec E3 run ledger（項 1/5）。
